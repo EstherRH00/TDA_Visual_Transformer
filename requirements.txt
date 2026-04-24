@@ -1,0 +1,10 @@
+torch
+torchvision
+timm
+numpy
+opencv-python
+scikit-learn
+matplotlib
+tqdm
+giotto-tda
+pyyaml
