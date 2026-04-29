@@ -14,11 +14,9 @@ class MammographyDataset(Dataset):
         return len(self.image_paths)
 
     def __getitem__(self, idx):
-        img = load_dicom(self.image_paths[idx])
+        img = np.load(self.image_paths[idx])
 
         img = cv2.resize(img, (224, 224))
-
-        # Convert to 3 channels (VERY IMPORTANT for ViT)
         img = np.stack([img, img, img], axis=-1)
 
         img = torch.tensor(img).float().permute(2,0,1) / 255.0

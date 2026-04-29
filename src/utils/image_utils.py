@@ -38,14 +38,9 @@ def resolve_dicom_path(rel_path):
 
     files_with_size.sort(key=lambda x: x[1], reverse=False)
 
-    if len(files_with_size) > 1:
-        print("⚠️ Multiple DICOM files:")
-        for p, s in files_with_size:
-            print(f"  {os.path.basename(p)} → {s/1e6:.2f} MB")
+    if len(files_with_size) != 2:
+        raise Exception("Unexpected amount of files in:", files_with_size)
 
     selected_path = files_with_size[0][0]
-
-    print("SELECTED:", selected_path)
-    print("EXISTS:", os.path.exists(selected_path))
 
     return selected_path
