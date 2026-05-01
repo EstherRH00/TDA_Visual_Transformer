@@ -1,522 +1,133 @@
-\documentclass[ENG]{TFUOC}%IB: CASTELLÀ, CAT: CATALÀ, ENG: ANGLISH
+import pydicom
+import numpy as np
+import os
+from tqdm import tqdm
+import pandas as pd
 
-\usepackage{amsmath}
-\usepackage{amsfonts} 
+BASE_PATH = r"C:/Users/esthe/Documents/UOC/TFM/TDA_Visual_Transformer/data/raw/cbis_ddsm"
 
-%Introduce Work Data
-\title{Topological image feature extraction for Visual Transformer Breast Cancer Classification}
-\titcrt{Breast cancer clasification using images} %Short title to appear in header
-\author{Esther Ruano Hortoneda}
-\date{February 28, 2026}
+def load_dicom(path):
+    dcm = pydicom.dcmread(path)
+    img = dcm.pixel_array.astype(np.float32)
 
+    # normalize to 0–255
+    img = (img - img.min()) / (img.max() - img.min())
+    img = (img * 255).astype(np.uint8)
 
-\nomPDC{Ana Belén Nieto Librero}
-\nomPRA{Ana Belén Nieto Librero}
-\titulac{Master in Data Science}
-\area{Machine learning in clinical data analytics}
-\idioma{English}
-\credits{12}
-\parcla{Image classification, Deep learning, Breast cancer}
+    return img
 
-\licenc{ccBy}
-%Possible licenses
-%ccByNcNd
-%ccByNcSa
-%ccByNc
-%ccByNd
-%ccBySa
-%ccBy
-%GNU
-%copyright
+def get_all_dcm_files_with_size(rel_path):
+    rel_path = rel_path.strip()
+    folder = os.path.dirname(rel_path)
 
+    full_folder = os.path.join(BASE_PATH, folder)
 
-%%%%%%%%%%
-% Summary in language
+    full_folder = r"\\?\{}".format(os.path.abspath(full_folder))
 
-\abstractidioma{
-Aquest projecte busca desenvolupar una arquitectura Deep Learning per classificar imatges mamogràfiques de manera binària (tumor vs. no-tumor) a partir del CBIS-DDSM dataset. L'enfocament proposat combina tècniques de preprocessat d'imatges, que inclouen reducció de soroll, millora de contrast, i extracció de característiques utilitzant Anàlisi de Dades Topològica (TDA) per capturar les propietats estructurals del teixit mamari.
+    if not os.path.exists(full_folder):
+        raise FileNotFoundError(f"Folder not found: {full_folder}")
 
-Tant les imatges processades com els descriptors topològics extrets s'integraran amb un Vision Transformer (ViT) que realitzarà la classificació final. L'objectiu és avaluar si incorporar classificació topològica explícita millora els resultats de classificació.
-}
+    dcm_files = [f for f in os.listdir(full_folder) if f.endswith(".dcm")]
 
-% Summary in English.
-\abstractenglish{
-This project aims to develop a Deep Learning pipeline for the binary classification of mammographic images (tumor vs. non-tumor) using the CBIS-DDSM dataset. The proposed approach combines image preprocessing techniques, including noise reduction and contrast enhancement, with feature extraction based on Topological Data Analysis (TDA) to capture structural properties of breast tissue.
+    if len(dcm_files) == 0:
+        raise FileNotFoundError(f"No DICOM files in {full_folder}")
 
-Both the processed images and the extracted topological descriptors will be integrated with a Vision Transformer (ViT) model for final classification. The objective is to evaluate whether incorporating explicit topological information improves classification performance.
-}
+    files_with_size = []
+    for f in dcm_files:
+        p = os.path.join(full_folder, f)
+        files_with_size.append((p, os.path.getsize(p)))
 
-\begin{document}
+    files_with_size.sort(key=lambda x: x[1], reverse=False)
 
-\estructura
+    return files_with_size
 
-\tableofcontents
+def resolve_cropped_mamogram_path(rel_path):
+    files_with_size = get_all_dcm_files_with_size(rel_path)
 
-\listoffigures
+    if len(files_with_size) != 2:
+        raise Exception("Unexpected amount of files in:", files_with_size)
 
-\listoftables
+    cropped_mamogram_path = files_with_size[0][0]
 
+    return cropped_mamogram_path
 
-\chapter{Introduction}
+def resolve_cropped_mamogram_and_roi_mask_path(rel_path):
+    files_with_size = get_all_dcm_files_with_size(rel_path)
 
-Breast cancer remains the most prevalent oncological disease worldwide. According to the World Health Organization \cite{who_cancer_2024}, it represents a leading cause of cancer-related mortality among women globally. Early detection plays a crucial role in improving survival rates, and medical imaging techniques such as mammography are fundamental tools in preliminary diagnosis.
+    if len(files_with_size) != 2:
+        raise Exception("Unexpected amount of files in:", files_with_size)
 
-In recent years, significant advances in Artificial Intelligence and Deep Learning have transformed medical image analysis. New approaches such as lightweight architectures \cite{lightweight}, hybrid feature extraction techniques \cite{hybrid}, and transfer learning strategies \cite{transferLearning} have demonstrated promising results in improving diagnostic performance while reducing computational cost. These developments open new possibilities for enhancing automated breast cancer detection systems.
+    cropped_mamogram_path = files_with_size[0][0]   # smallest = mammogram
+    mask_path = files_with_size[1][0]               # biggest = ROI mask
 
-Motivated by these advances and supported by a strong mathematical and analytical background, this work explores the integration of modern deep learning architectures with advanced image processing and structural feature extraction techniques for mammographic image classification.
+    return cropped_mamogram_path, mask_path
 
-\section{Context and justification of work}\label{context}
+def encode_label(label):
+    return 1 if label == "MALIGNANT" else 0
 
-Breast cancer diagnosis has become an active research area due to its medical relevance and the rapid development of computational methods for medical imaging analysis. The current research landscape shows a significant growth in the application of deep learning techniques for tumor detection and classification, including generative adversarial networks (GANs), convolutional neural networks (CNNs) and large language models (LLMs) \cite{stateOfTheArt}. 
+def cache_images_as_np_arrays(save_dir, df):
+    os.makedirs(save_dir, exist_ok=True)
 
-\sloppy Breast imaging can be obtained through several procedures: mammography, ultrasound, magnetic resonance imaging (MRI), synthetic phantoms, etc. Among publicly available datasets, two widely used resources are the Curated Breast Imaging Subset of Digital Database for Screening Mammography (CBIS-DDSM) \cite{cbis_ddsm_dataset} and the VICTRE breast phantom dataset \cite{victre_breast_phantom}. Since mammography remains the most common imaging modality for preliminary breast cancer screening, this work focuses on the CBIS-DDSM dataset to ensure clinical relevance and comparability with previous studies.
+    image_paths = []
+    labels = []
+    cached_paths = []
 
-Image preprocessing plays a critical role in image classification. Common techniques include noise reduction and contrast enhancement, which improves the visibility of relevant anatomical structures and lesions. Previous studies have demonstrated the effectiveness of such preprocessing steps in improving classification performance \cite{DeepLearningEmpoweredBreastCancerDiagnosis, ImageTreatement}. Therefore, similar preprocessing strategies are incorporated into the proposed pipeline.
+    for i, row in tqdm(df.iterrows()):
+        try:
+            rel_path = row["cropped image file path"]
+            full_path = resolve_cropped_mamogram_path(rel_path)
 
-In addition to conventional preprocessing, this work introduces Topological Data Analysis (TDA) as a complementary feature extraction approach. Recent research has shown promising results when integrating topological information into deep learning models \cite{TopoTxR}. TDA captures structural and connectivity-related properties of images that may not be fully represented by pixel-based learning alone. Furthermore, the use of explicit structural descriptors may contribute to improved explainability, which is particularly important in medical applications.
+            label = encode_label(row["pathology"])
 
-Regarding model selection, comparative studies evaluating different deep learning architectures for breast cancer classification indicate that Vision Transformers (ViT) achieve competitive or superior performance compared to traditional convolutional networks \cite{Comparation, Comparation2}. Based on these findings, the Vision Transformer architecture is adopted as the primary classification model in this work.
+            image_paths.append(full_path)
+            labels.append(label)
 
-\section{Work objectives}
+            try:
+                img = load_dicom(full_path)
 
-The central hypothesis of this work is that the integration of image preprocessing techniques and Topological Data Analysis (TDA) features into a Vision Transformer (ViT) architecture improves the classification performance of mammographic images compared to a baseline ViT model without such enhancements.
+                save_path = os.path.join(save_dir, f"img_{i}.npy")
+                np.save(save_path, img)
 
-More specifically:
+                cached_paths.append(save_path)
 
-\begin{itemize}
-    \item H1: Image preprocessing techniques (noise reduction and contrast enhancement) positively impact the classification accuracy of a Vision Transformer model.
-    \item H2: The incorporation of topological descriptors derived from TDA provides complementary structural information that improves classification performance compared to a standard Vision Transformer.
-\end{itemize}
+            except Exception as e:
+                print("Error:", e)
 
-To test these hypotheses, the following objectives are defined:
+        except Exception as e:
+            print("Skipping:", e)
+            
+        row
 
-\begin{itemize}
-    \item To implement a baseline Vision Transformer model for mammographic image classification using the CBIS-DDSM dataset.
+    cache_df = pd.DataFrame({
+        "path": cached_paths,
+        "label": labels
+    })
+
+    cache_df.to_csv(os.path.join(save_dir, f"cached.csv"), index=False)
+
+def extract_roi_crop(mammogram, mask, padding_ratio=0.15):
+    """
+    Extract the ROI crop from a full mammogram using the binary mask.
     
-    \item To evaluate the impact of image preprocessing techniques on the performance of the baseline model.
+    Returns:
+        roi_crop: cropped mammogram region around the lesion (ViT input)
+        masked_crop: same region with mask applied (TDA input for E5-E8)
+    """
+    rows = np.any(mask > 0, axis=1)
+    cols = np.any(mask > 0, axis=0)
+    rmin, rmax = np.where(rows)[0][[0, -1]]
+    cmin, cmax = np.where(cols)[0][[0, -1]]
     
-    \item To extract topological features from mammographic images using Topological Data Analysis methods.
+    pad_h = int((rmax - rmin) * padding_ratio)
+    pad_w = int((cmax - cmin) * padding_ratio)
     
-    \item To design the architecture integrating TDA features with the Vision Transformer model.
+    rmin = max(0, rmin - pad_h)
+    rmax = min(mammogram.shape[0], rmax + pad_h)
+    cmin = max(0, cmin - pad_w)
+    cmax = min(mammogram.shape[1], cmax + pad_w)
     
-    \item To compare all approaches using quantitative performance metrics such as accuracy, sensitivity, specificity, F1-score, and AUC.
+    roi_crop = mammogram[rmin:rmax, cmin:cmax]
+    mask_crop = mask[rmin:rmax, cmin:cmax]
+    masked_crop = roi_crop * (mask_crop > 0).astype(np.float32)
     
-    \item To develop a theoretical and practical understanding of Vision Transformer architectures and medical image preprocessing techniques.
-\end{itemize}
-
-\section{Impact on sustainability, ethics-social and diversity}
-\label{s:etic}
-
-This project is aligned with the United Nations Sustainable Development Goals (SDGs) \cite{un_sustainable_dev_goals}, particularly Goal 3 (Good Health and Well-being) and Goal 10 (Reduced Inequalities).
-
-Breast cancer is one of the leading causes of cancer-related mortality worldwide \cite{who_cancer_2024}. Early diagnosis and treatment through screening programs significantly increases survival rates. The development of computer-aided diagnostic tools based on Artificial Intelligence can support medical professionals by assisting in the early detection of suspicious lesions, potentially reducing diagnostic delays and improving patient outcomes (SDG 3).
-
-From a social perspective, automated diagnostic support systems may help reduce inequalities in access to specialized medical expertise (SDG 10). In regions with limited access to experienced radiologists, AI-based tools could provide preliminary assessments, contributing to more equitable healthcare delivery.
-
-However, the ethical implications of AI in medical decision-making must be carefully considered. Automated systems should not replace medical professionals but rather support them. Issues such as model bias, generalization across populations, transparency, and interpretability are critical. In this work, the incorporation of Topological Data Analysis aims not only to improve performance but also to enhance structural interpretability of the learned features.
-
-Regarding sustainability, the computational cost of training deep learning models is also considered. The use of efficient architectures and controlled experimentation seeks to balance model performance with responsible resource consumption.
-
-\section{Focus and method followed}
-
-This work follows an experimental research strategy within the field of applied machine learning. The objective is to design, implement, and evaluate a deep learning-based classification system for mammographic images.
-
-The research adopts a quantitative approach, where performance metrics obtained from experiments are used to validate the proposed hypotheses. Since the study focuses on computational model evaluation using publicly available datasets, no qualitative data collection methods are involved.
-
-From a development perspective, this project can be classified as the design and implementation of a new computational pipeline integrating existing technologies (Vision Transformers and Topological Data Analysis) into a novel hybrid architecture.
-
-The methodological process consists of the following stages:
-
-\begin{enumerate}
-    \sloppy \item Literature review on breast cancer image classification, preprocessing techniques, transformer-based architectures, and TDA.
-    
-    \item Dataset selection and preparation using the CBIS-DDSM dataset.
-    
-    \item Implementation of a baseline Vision Transformer model.
-    
-    \item Integration of preprocessing techniques (noise reduction and contrast enhancement).
-    
-    \item Extraction of topological descriptors and design of a hybrid model architecture.
-    
-    \item Experimental evaluation and comparison of different model configurations using quantitative metrics.
-    
-    \item Statistical analysis and interpretation of results.
-\end{enumerate}
-
-The project follows an iterative prototyping methodology. Models are developed incrementally, starting from a baseline implementation and progressively integrating preprocessing and topological features. Each iteration includes training, validation, performance evaluation, and refinement.
-
-The tools used include programming environments for deep learning model development, numerical computation libraries, and image processing frameworks appropriate for medical image analysis. In addition, a requirement analysis is conducted to clearly define the system specifications and guide the development process.
-
-\subsection{Requirement Analysis}
-
-The project requires the definition of both functional and non-functional requirements to ensure a structured development process.
-
-\textbf{Functional requirements:}
-\begin{itemize}
-    \item Load and preprocess the CBIS-DDSM dataset.
-    \item Implement a Vision Transformer (ViT) for binary classification (benign vs malignant).
-    \item Extract and integrate Topological Data Analysis (TDA) features.
-    \item Train, validate, and test the model.
-    \item Evaluate performance using metrics such as accuracy, precision, recall, and F1-score.
-\end{itemize}
-
-\textbf{Non-functional requirements:}
-\begin{itemize}
-    \item Reproducibility of experiments.
-    \item Computational efficiency.
-    \item Modularity of the implementation.
-    \item Interpretability of results.
-\end{itemize}
-
-\section{Work schedule}
-
-The work schedule for this project has been structured to align with the defined objectives and deliverables. A Gantt diagram \ref{fig:gantt} has been created to break down each deliverable into individual tasks, illustrating their planned start and end dates, dependencies, and expected duration. The schedule is periodically updated to reflect the current progress, with the latest update recorded as of March 22nd, 2026.
-
-This structured plan ensures systematic progress toward the project goals, facilitates monitoring of milestones, and allows timely adjustments if necessary.
-
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=\textwidth]{gantt.png}
-    \caption{Gantt diagram}
-    \label{fig:gantt}
-\end{figure}
-
-
-\section{Brief summary of products obtained}
-
-No need to go into detail: the detailed description will be made in the rest of the chapters.
-
-%It is not necessary to enter in detail: the detailed description will be done in the rest of the chapters.
-
-\section{Brief description of other memory chapters}
-
-Brief explanation of the contents of each chapter and its relationship with the global project.
-
-\chapter{State of Art}
-
-In this chapter we will cover the state of the Art of each of the components involved in the model proposed in the Context and justification of work \ref{context} above. This chapter is split into four sections:
-
-\begin{enumerate}
-    \item \textbf{How CBIS-DDSM is used and evaluated in the literature}: describes the characteristics of the dataset and how the dataset has been studied. It also explores what techniques and metrics are used to evaluate the results and their meaning.
-        
-    \item \textbf{Visual Transformers (ViT)}: explains what visual transformers are, and compares them to classical Convolutional Neural Networks (CNNs).
-    
-    \item \textbf{Topological Data Analysis (TDA) applied to images}: details what topological features are and how they can be extracted from images.
-
-    \item \textbf{Combining ViT and TDA}: explores the research gap and how this thesis can help reduce it.
-\end{enumerate}
-
-Following these steps, it will provide a comprehensive review of the current status of the research related to the project.
-
-\section{CBIS-DDSM dataset}\label{CBIS-DDSM}
-
-In this section we will explore how the CBIS-DDSM dataset is used and evaluated in the literature. First, lets recall the characteristics of the dataset: by visiting the documentation provided by the Cancer Imaging Achive \cite{cbis_ddsm_dataset}, the DDSM is a database of 2,620 scanned film mammography studies. It contains normal, benign, and malignant cases with verified pathology information from 1566 subjects. Details on how to use the dataset were published simultaneously \cite{how_to_CBIS-DDSM}, and it addresses a key limitation in previous research: the lack of standardized and reproducible evaluation protocols in mammography-based computer-aided diagnosis systems. Prior studies often relied on private datasets or non-standard subsets of public databases, making direct comparison between methods difficult. To overcome this issue, the authors introduced a curated and standardized version of the original dataset: decompressed images in DICOM format, improved region-of-interest (ROI) annotations, and verified pathology labels. Additionally, predefined training and testing splits were provided to facilitate consistent evaluation across different studies. Another important contribution of this work is the enhancement of annotation quality. The ROI segmentations were refined using automated methods and validated against expert radiologist annotations using metrics such as the Dice coefficient, showing a significant improvement over the original DDSM annotations. This increases the reliability of the dataset as a benchmark for both detection and segmentation tasks. Overall, CBIS-DDSM was designed not only as a larger and cleaner dataset, but as a step towards more reproducible and comparable research in breast cancer diagnosis using medical imaging.
-
-This dataset has been used to study breast cancer from very different angles: from classification problems (binary \cite{binary_CBIS-DDSM_1}) or multi-class \cite{multi_class_CBIS-DDSM}), localization \cite{localization_CBIS-DDSM}, segmentation \cite{segmentation_CBIS-DDSM}, etc. 
-
-In this paper, we will focus on binary classification; in the next paragraphs we visit different binary classification relevant papers that have used this dataset, what results have they obtained and what do these results mean. Before doing that, we cover some definitions regarding binary classification evaluation  \cite{binary_CBIS-DDSM_1}.
-
-\subsection{Evaluation Metrics}
-The metrics used in the papers that we have studied are the following: 
-
-\subsubsection{Confusion Matrix}
-
-A confusion matrix is a tabular representation that is used to analyse the performance of a classification model by comparing predicted labels with the true labels. In the case of binary classification, the confusion matrix consists of four main components:
-
-\begin{itemize}
-\item True Positive (TP): the number of instances that belong to the positive class and are correctly classified as positive.
-\item True Negative (TN): the number of instances that belong to the negative class and are correctly classified as negative.
-\item False Positive (FP): the number of instances that belong to the negative class but are incorrectly classified as positive.
-\item False Negative (FN): the number of instances that belong to the positive class but are incorrectly classified as negative.
-\end{itemize}
-
-\subsubsection{Accuracy}
-
-Accuracy is one of the most commonly used evaluation metrics. It measures the proportion of correctly classified instances out of the total number of instances. It is defined as:
-
-\begin{equation}
-\text{Accuracy} = \frac{TP + TN}{TP + TN + FP + FN}
-\end{equation}
-
-Although accuracy is intuitive and easy to interpret, it may not be a reliable metric in the presence of class imbalance. In such situations, a model may achieve a high accuracy while still performing poorly on the minority class.
-
-\subsubsection{F1 Score}
-
-The F1 score is a metric that combines precision and recall into a single value, providing a balance between the two. It is particularly useful when both false positives and false negatives are of concern.
-
-First, precision and recall are defined as follows:
-
-\begin{equation}
-\text{Precision} = \frac{TP}{TP + FP}
-\end{equation}
-
-\begin{equation}
-\text{Recall} = \frac{TP}{TP + FN}
-\end{equation}
-
-The F1 score is then computed as the harmonic mean of precision and recall:
-
-\begin{equation}
-F1 = 2 \cdot \frac{\text{Precision} \cdot \text{Recall}}{\text{Precision} + \text{Recall}}
-\end{equation}
-
-This metric is especially appropriate in scenarios with imbalanced datasets, where a trade-off between precision and recall must be considered.
-
-\subsubsection{Area Under the Curve (AUC)}
-
-The Area Under the Curve (AUC) typically refers to the area under the Receiver Operating Characteristic (ROC) curve. The ROC curve illustrates the relationship between the True Positive Rate (TPR) and the False Positive Rate (FPR) across different classification thresholds.
-
-The TPR and FPR are defined as:
-
-\begin{equation}
-\text{TPR} = \frac{TP}{TP + FN}
-\end{equation}
-
-\begin{equation}
-\text{FPR} = \frac{FP}{FP + TN}
-\end{equation}
-
-The AUC value can be interpreted as the probability that the model assigns a higher score to a randomly selected positive instance than to a randomly selected negative instance. An AUC value close to 1 indicates strong discriminative ability, whereas a value close to 0.5 suggests performance equivalent to random classification.
-
-\subsection{Studies done with the CBIS-DDSM Dataset}
-
-Next, we compare some of the work that has been done with the dataset, to analyze how they processed the data, which models they trained and which results were achieved.
-
-\begin{itemize}
-    \item \textbf{Transfer Learning and Fine Tuning in Breast Mammogram Abnormalities Classification on CBIS-DDSM Database} \cite{binary_CBIS-DDSM_1}: 
-    the methodology proposed in this paper prepares the data by changing the resolution of the images and augmenting the contrast using  the Contrast Limited Adaptive Histogram Equalization (CLAHE) \cite{clahe_original_paper} that enhances image quality by applying histogram equalization locally on small regions (tiles), which improves contrast and reveals fine details in different parts of the image. Next, they find the region of interest (ROI) using a box surrounding the suspicious mass, and normalize that region again.
-    Since these boxes can be of different shapes, they keep only the ROIs with an aspect ratio $r = \frac{w}{h}$ between 0.4 and 1.5. Lastly, the ROIs are resized to a final shape of $320 \times 320$: they added a padding of 8 pixels and then cropped the center of the image, and filtered the image to reduce noise.
-
-    Next, a step of data augmentation is taken to prevent overfitting. This is achived by applying rotations, shears, flips, zooms, etc. to the images. They considered the Train/Test split that the CBIS-DDSM dataset presents, but joined them to augment the data and then splitted them into different Train and Test sets once they had increased the size to 60 thousand images. They split it into 80\% for training, 10\% for validation and the last 10\% for testing.
-
-    Lastly, they used the modified dataset in seven CNNs that were pretrained, and studied the performance of Transfer Learning. Since the problem approached in this paper is binary classification, they evaluated the results using a confusion matrics, Accuracy, F1 score and Area under the ROC curve. They saw best results in VGG16 \cite{vgg16}, with  so they fine-tuned it adjusting the initial model and obtained values of $\text{AUC}=0.844\text{, }F_{1}= 0.85\text{, ACC}= 0.844$.
-    \item \textbf{Sensitivity-Based Breast Cancer Characterization on CBIS-DDSM Mammography Dataset Using Fine-Tuned EfficientNet-B2 Model } \cite{binary_CBIS-DDSM_2}:
-    the preprocessing in this paper is specially different to the one we have seen above. The images are reduced to a constant resolution and no data augmentation processes were applied. Once more, they did not respect the Train-Test partition provided by the CBIS-DDSM dataset, but defined their own that was more balanced. 
-    
-    Since the amount of images corresponding to beningn tumors is greater than the ones depicting malignant tumors, they opted for imbalance-conscious learning methods: an EffincientNet-B2, that was pretrained, followed by Global Average Pooling, a Fully Connected layer, Batch Normalization and a Sigmoid output layer. They fine-tuned the last 25 layers of the model and obtained $\text{AUC}=0.679\text{, ACC}= 0.6496$, which is not bad considering that it had a small ammount of trainable parameters.
-    \item \textbf{Deep BI-RADS Network for Improved Cancer Detection from Mammograms} \cite{binary_CBIS-DDSM_3}:
-    the uniqueness of this paper, compared with the two above, is that they do not use the full BIS-DDSM dataset, but instead they take a subset and enrich it with additional clinical data: it utilizes the textual metadata associated with each mammogram, that provides extra information about the kind of lesion and breast descriptors of the Breast Imaging Reporting and Data System (BI-RADS) \cite{birads}.
-
-    The architecture consists of two branches, each composed of 6 stacked identical attention-based layers, that takes images and textual descriptors. They process the images by scaling them to $1024\times1024$ pixels, and conduct data augmentation by doing flips and elastic deformation. Then, features are extracted form the images using BiT layers, that are pre-trained. That is followed by various attention layers, that range from Cross-Attention, Self-Attention, etc. The data is fed to them in mini-badges of 16. The besst results obtained in this paper, that tried various (Query, Key, Value) configurations is f $\text{AUC}=0.878\text{, }F_{1}= 0.780\text{, ACC}= 0.796$.
-\end{itemize}
-
-The following table summarizes the lines above.
-
-
-\begin{table}[htbp]
-\centering
-\caption{Summary of CBIS-DDSM binary classification studies}
-\label{tab:cbis_summary}
-\begin{tabular}{ |m{25em} |m{3em} |m{3em} |m{3em} | } 
- \hline
- Study & AUC & ACC & $F_1$ \\ 
- \hline
- \hline
- Transfer Learning and Fine Tuning in Breast Mammogram Abnormalities Classification on CBIS-DDSM Database \cite{binary_CBIS-DDSM_1} & 0.844& 0.844 & 0.85 \\ 
- \hline 
- Sensitivity-Based Breast Cancer Characterization on CBIS-DDSM Mammography Dataset Using Fine-Tuned EfficientNet-B2 Model \cite{binary_CBIS-DDSM_2}: & 0.679& 0.6469 & - \\ 
- \hline 
- Deep BI-RADS Network for Improved Cancer Detection from Mammograms \cite{binary_CBIS-DDSM_3} &0.878& 0.796&0.780 \\
- \hline
-\end{tabular}
-\end{table}
-
-From all these papers we can learn that there is not one standarized way to treat the volume of data in the CBIS-DDSM dataset, nor the imbalance that it presents. All of them use pre-trained datasets and fine-tune them in the last step in order to achieve the best results, which is aligned with the plan layed out in this project. It is notable how the projects that augmented the data and added other forms of data such as text obtained the best results, while the project that kept the dataset intact presented worse AUC and ACC.
-
-\section{Visual Transformers (ViT)}\label{ViT}
-This section introduces Vision Transformers (ViT) and explains how they operate. Theyn are also compared with traditional Convolutional Neural Networks (CNNs), which are the more traditional alternative to address image classification problems like the one proposed in this project.
-
-Vision Transformers were introduced in 2021 in the paper \textit{An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale} \cite{ViT_original_paper}. The paper studies how Transformer architectures, which are very successful in Natural Language Processing, can be adapted to Computer Vision tasks. 
-
-The idea proposed by Dosovitskiy et. al. \cite{ViT_original_paper} is to remove convolution completely and instead apply the transformers directly to images, that are codified as sequences of tokens. This new approach reduces the resources needed, whilst maintaining excellent results when pre-trained with large amounts of data. Consecuently, we can split Vision Transformers into two stages:
-
-\begin{enumerate}
-    \item \textbf{Image to patch embeddings:} to create a one-dimensional sequence of token embeddings to feed the transformer from a 2D image, ViT first converts an image into a sequence of patches. Given an input image $x \in \mathbb{R}^{H \times W \times C}$, where $(H,W) \text{ is the resolution of the image and }C$ is the number of channels (3 in case of an RGB image), the image is divided into $N= \frac{HW}{P^2}$ $2D$ non-overlapping patches of size $P \times P$: $X_p \in \mathbb{R}^{N \times P^2 \cdot C}$. $N$ will be the input sequence length for the Transformer.
-
-    Each of the transformer layers uses a constant latent vector of size $D$: the $N$ image patches need to be flattened into $D$ dimensions using a trainable linear projection, that results into the \textit{patch embedding}, similar to word embeddings in NLP.
-    \[
-    z_0 = [x_{\text{class}}; x_p^1E; x_p^2E; \dots; x_p^N E] + E_{pos}
-    \]
-    where $E \in \mathbb{R}^{(P^2 \cdot C) \times D}\text{, }E_{pos} \in \mathbb{R}^{(N+1) \times D} \text{ and } x_{\text{class}}$ is a learnable classification token.
-
-    Position embeddings are added to the patch embeddings to retain positional information. It is done using standard learnable 1D position embeddings. The resulting sequence of embedding vectors serves as input to the encoder.
-    \item \textbf{Transformer encoder:} after embedding, the sequence of patches is passed to a standard Transformer encoder. The encoder consists of multiple identical layers, each containing:
-    
-    \begin{itemize}
-        \item Multi-Head Self-Attention (MSA): introduced in \textit{Attention Is All You Need} \cite{attention}, it is a mechanism to compute attention between all input tokens using multiple parallel attention heads to capture diverse relationships.
-        \item Feed-Forward Network (MLP): consisting of fully connected layers with GELU activation functions\cite{gelu}: it consists in non-linear Gaussian activation.
-        \item Layer Normalization (LN) before every block.
-        \item Residual connections after every block.
-    \end{itemize}
-    
-\end{enumerate}
-
-The work done in \textit{An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale} \cite{ViT_original_paper} found that the Vision Transformers are, in general, less robust to small perturbations than conventional CNNs: they have less inductive bias. This is because the position embeddings a the initialization time carry no information about the positions of the patches. Since they have to be learned from scratch, and only MLP layers are invariant to translations. Dividing the image into patches breaks the two-dimensional neighborhood structure but, when trained with large datasets, having learned these spatial relationships from the data makes it more flexible.
-
-For these reasons, the typical use case of a ViT requires pre-training with a big dataset and then fine-tuning to the smaller task (breast cancer image classification). The initial study \cite{ViT_original_paper} found that pre-trained ViTs dominate CNNs on the performance/compute trade-off.
-
-This original proposal for Visual Transformers \cite{ViT_original_paper} compared them to Residual Networks (ResNets), those are a particular type of CNNs introduced in 2015 by Kaiming He et. al., in a paper titled \textit{Deep Residual Learning for Image Recognition} \cite{resnet_original_paper}. ResNets are designed to enable the effective training of very deep models by introducing \textit{residual learning}. Instead of directly learning a desired mapping $H(x)$, each block learns a residual function $F(x) = H(x) - x$, which is combined with the input through identity shortcut (skip) connections. The results show that gradients flow more easily through the network; and it mitigates the degradation problem where deeper networks perform worse than shallower ones.
-
-As it is a type of Convolutional Neural Network, it processes images by using convolutional layers with small kernels (e.g., $3 \times 3$). The main trait of them, as we just mentioned, is that the input is added back in every convolutional block. On the other hand, Visual Transformers do not use convolution whatsoever, and trade off that local context for global context. The following figure \ref{fig:vit_vs_resnet} illustrates these differences.
-
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=\textwidth]{resnet_vs_vit.png}
-    \caption{Residual Network and Visual Transformer Architectures}
-    \label{fig:vit_vs_resnet}
-\end{figure}
-
-\section{Topological Data Analysis (TDA) applied to images}\label{TDA}
-% he d'explicar l'algorisme de com aconseguir persistence images
-
-This section explains what topological descriptors represent, and  how to compute homology descriptors that can be embedded in a Visual Transformer: persistence images. 
-
-Topology is a branch of mathematics that studies the shape of objects and their main properties that do not change under continuous transformations. In the context of topological data analysis (TDA), these concepts can be applied to analyse the structure of grayscale images, where the pixel intensity values define the data representation. One of the most commonly used techniques in TDA is persistent homology, which allows to track the appearance and disappearance of topological features, such as connected components and holes, across different intensity thresholds.\cite{tfg}
-
-These features are represented using persistence diagrams (PDs), which describe the lifetime of each topological feature from its birth to its death. Since PDs are not directly suitable for most machine learning models, they are usually transformed into a finite-dimensional representation called persistence images (PIs). In the following sections, we explain the process of transforming grayscale images into persistence images.
-
-First, we consider a grayscale image, where each pixel is associated with an intensity value. This image can be interpreted as a function defined on a grid, in which the intensity values represent different levels of the structure. To analyse this image using TDA, we study how the structure changes when we progressively vary a threshold over the intensity values.
-
-For each threshold value, we construct a binary image by selecting the pixels that satisfy the given condition. In this way, we can observe how many connected components and holes are present at each stage. As the threshold changes, new components can appear, existing ones can merge, and holes can be created or filled. Persistent homology allows to track these changes by recording the birth and death of each topological feature.
-
-The information about these features is stored in persistence diagrams, where each point represents a feature with its corresponding birth and death values. These diagrams provide a compact summary of the topological structure of the image across all thresholds. However, since persistence diagrams are not directly compatible with many machine learning algorithms, they are further transformed into persistence images.
-
-The following diagram depicts this process with an example grayscale image. \ref{fig:persistence_diagram}
-
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=\textwidth]{persistance_diagram.png}
-    \caption[How to compute a persistence diagram]{How to compute a persistence diagram: given a grayscale image, we consider how many connected components ($H_0$) and cycles ($H_1$) there are. By monitoring when they appear (birth) and when they get absorbed by another component, we can draw a Barcode Diagram, that has one paralel line for each component, and a Persistance Diagram, that has one point in coordinates $(B, D)$ corresponding to each birth ($B$) and Death ($D$) of a component.}
-    \label{fig:persistence_diagram}
-\end{figure}
-
-Finally, the persistence diagram is converted into a persistence image by mapping each point into a continuous domain (usually transposing the persistence diagram) and applying a suitable probability distribution and weighting function, $f:\mathbb{R}^2 \to \mathbb{R}$, that must be zero along the horizontal axis, continuous and picewise differentiable\cite{persistence_images_original_paper}. The example in \cite[Image 1]{persistence_images_original_paper} illustrates this procedure.
-
-
-\section{Combining ViT and TDA:}\label{Vit_and_TDA}
-
-Finally, this section explores existing systems that use Topological Data Analysis to improve a Vision Transformer, how it is embedded into the architecture, what applications were explored, and the results achieved.
-
-Recent works have shown that, while Vision Transformers are powerful in capturing global dependencies through self-attention, they may lack robustness in representing intrinsic geometric and topological structures of the data. 
-The integration of TDA can help address this limitation, providin complementary information about the shape and connectivity of data distributions.
-
-The work in \textit{TDA-ViT: A Transformer-Based Framework for Unified Urdu Text Recognition via Topological and Visual Feature Fusion} \cite{tda_vit_1} introduces a Transformer-based framework that combines visual and topological features for the task of Urdu text recognition. The approach followed consists of four stages:
-
-\begin{enumerate}
-    \item Topological descriptors are extracted from images of Urdu text, and stored into persistence images \ref{TDA}.
-    \item Raw and persistent images are encoded using a Vision Transformer for feature embedding. This produces a high-dimensional feature sequence that encodes both pixel-level and topological information.
-    \item The resulting sequences are passed to a T5-based encoder (Transformer used for Natural Language Processing).
-    \item Lastly, the sequences are decoded using a GPT-2 based decoder.
-\end{enumerate}
-
-This hybrid approach improves robustness to noise and distortions, which are common in handwritten or low-quality text images. Experimentally, the model demonstrates improved recognition accuracy compared to standard ViT-based baselines, highlighting the benefit of incorporating topological descriptors.
-
-Despite these promising contributions, there are still several limitations and open challenges that motivate further research. First, the application domains explored in the current literature remain relatively limited, with a strong focus on text recognition. There is a lack of investigation in other domains such as medical imaging, where topological structures are often highly informative. In particular, mammography datasets such as CBIS-DDSM contain subtle structural patterns (e.g., mass irregularity, spiculation, and boundary complexity) that are not explicitly addressed in the existing works.
-
-Second, the computational cost and scalability of TDA components are not deeply analyzed in these works. Persistent homology can be expensive to compute, especially for high-resolution medical images, and its impact on training efficiency remains an open question.
-
-There is a gap in the literature regarding the design of a TDA-enhanced Vision Transformer architectures for medical image classification. In this project, we aim to address it by investigating how topological features can be integrated into a ViT-based pipeline for binary classification of mammography images from the CBIS-DDSM dataset into benign and malignant categories.
-
-\chapter{Materials and methods}
-In these sections, it is necessary to describe:
-\begin{itemize}
-    \item The most relevant aspects of the design and development of the work.
-    \item The methodology chosen to carry out this development, describing the possible alternatives, the decisions taken, and the criteria used to make these decisions.
-    \item The products obtained.
-\end{itemize}
-
-\chapter{Statement on the use of generative artificial intelligence}
-
-Explanation of any use made of generative artificial intelligence tools (such as ChatGPT, Gemini, DALL-E, or others) during the conception and development of this Final Project, as well as the writing of this report and the preparation of the presentation. It is mandatory to specify the concrete tools used, the purpose (e.g., ideation, code outlining, grammatical correction, image generation, etc.), the periods or phases of the work in which they were employed, the actions taken to validate the content generated by AI, and a critical evaluation of the impact of their use. It must be explicitly clarified which parts of the work are entirely the student's authorship and which have been based on inputs or results generated by AI, ensuring at all times that the intellectual responsibility and final validation of the content fall entirely upon the student, and that its use has been discussed with the Project supervisor and carried out in accordance with their instructions.
-
-
- 
-\textbf{Chapter structuring may vary depending on the type of work.}  
- 
-If applicable, a section on “Economic evaluation of work” will be included. This section will indicate the expenses associated with the development and maintenance of work, as well as the economic benefits obtained and a final analysis on the viability of the product.
-
-
-
-\chapter{Results}
-
-Detail in this section the results obtained using the methodology described in the previous section.
-
-
-%Recull of job results. There should be a correspondence with the methodology that the results are what is obtained after applying the methodology.
-
-The figures must be explained and quoted in the text, such as \ref{fig:my_label}, in which the error is shown depending on the distance, in arbitrary units. All graphs must have the title of the axes.
-
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=7truecm]{Rplotmanh.png}
-    \caption{Error working distance in arbitrary units.}
-    \label{fig:my_label}
-\end{figure}
-
-%\chapter{Discussion}
-%Discussion of results in project context. It is in this section that they make sense and in which the research questions are answered and it is shown how the results respond to the problems raised.
-
-%This part may not apply depending on the type of work.
-
-%\chapter{Economic evaluation}
-%If applicable, a section of ``Economic evaluation of work' will be included. This section will indicate the expenses associated with the development and maintenance of work, as well as the economic benefits obtained. A final analysis on the viability of the product must be carried out.
-
-\chapter{Conclusions and future works}
-
-%\section{Conclusions}
-This chapter must include:
-\begin{itemize}
-\item A description of the conclusions of the work:
-\begin{itemize}
-    \item Once the results have been obtained, what conclusions are drawn?
-    \item Are these results as expected? Or have they been amazing? Why?
-\end{itemize}
-\item A critical reflection on the achievement of the objectives initially set:
-\begin{itemize}
-    \item Have we achieved all the objectives? If the answer is negative, why?
-\end{itemize}
-\item A critical analysis of the monitoring of planning and methodology throughout the product:
-\begin{itemize}
-    \item Has the schedule been followed?
-    \item Has the planned methodology been adequate enough?
-    \item Has it been necessary to introduce changes to ensure the success of the work? Why?
-\end{itemize}
-\item From the impacts foreseen in \ref{s:etic}, ethical-social, sustainability and diversity, evaluate/mention whether they have been mitigated (if they were negative) or whether they have been achieved (if they were positive). 
-\item If unforeseen impacts have appeared in \ref{s:etic}, evaluate/mention how they have mitigated (if they were negative) or what they have contributed (if they were positive).
-\item The future lines of work that have not been explored in this work and have remained pending.
-
-
-%\item A description of the conclusions of the work: What lessons have been learned from work?
-%\item A critical reflection on the achievement of the objectives initially set: Have we achieved all the objectives? If the answer is negative, why?
-%\item Of the impacts foreseen in the section \ref{s:etic}, an assessment, or at least mention, of whether they have been mitigated (if they were negative) or whether they have been achieved (if they were positive). 
-\end{itemize}
-
-%\section{Future Lines}
-%The future lines of work that could not be explored in this work and have been pending.
-
-%\section{Schedule Tracking}
-%A critical analysis of the monitoring of the planning and methodology throughout the work: 
-%\begin{itemize}
-%    \item  Have the schedule been followed? 
-%    \item Has the planned methodology been adequate? 
-%    \item Has it been necessary to introduce changes to ensure the success of the work? Why?
-%\end{itemize}
-
-\chapter{Glossary}
-
-Definition of the most relevant terms and acronyms used in the Report.
-
-%Defining the most relevant terms and acronyms used within the Memory.
-
-
-\bibliographystyle{unsrt}
-\bibliography{refs}
-
-
-\newpage
-\appendix
-List of sections that are too extensive to include in memory and have a self-contained character (e.g. user manuals, installation manuals, etc.)
- 
-Depending on the type of work, there may be no need to add an annex.
-
-\end{document}
+    return roi_crop, masked_crop

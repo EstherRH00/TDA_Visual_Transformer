@@ -1,5 +1,6 @@
 import os
 import copy
+import json
 import numpy as np
 import torch
 import torch.nn as nn
@@ -67,7 +68,7 @@ def evaluate(model, dataloader, criterion, device):
         "f1": f1_score(all_y, preds, zero_division=0),
         "auc": roc_auc_score(all_y, all_p) if len(np.unique(all_y)) > 1 else 0.0,
     }
-    return metrics
+    return metrics, all_y.tolist(), all_p.tolist()
 
 
 def run_experiment(model_fn, train_dataset, test_dataset, config):
@@ -87,8 +88,8 @@ def run_experiment(model_fn, train_dataset, test_dataset, config):
             - save_dir (str, default "checkpoints")
             - experiment_name (str)
     """
-    seed = config.get("seed", 42)
-    epochs = config.get("epochs", 2)
+    seed = config.get("seed", 2)
+    epochs = config.get("epochs", 30)
     patience = config.get("patience", 5)
     lr = config.get("lr", 1e-4)
     batch_size = config.get("batch_size", 16)
@@ -134,7 +135,7 @@ def run_experiment(model_fn, train_dataset, test_dataset, config):
 
     for epoch in range(1, epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device)
-        val_metrics = evaluate(model, val_loader, criterion, device)
+        val_metrics, _, _ = evaluate(model, val_loader, criterion, device)
         scheduler.step()
 
         history["train_loss"].append(train_loss)
@@ -159,9 +160,16 @@ def run_experiment(model_fn, train_dataset, test_dataset, config):
     # --- Save best & evaluate on test ---
     torch.save(best_state, ckpt_path)
     model.load_state_dict(best_state)
-    test_metrics = evaluate(model, test_loader, criterion, device)
+    test_metrics, y_true, y_prob = evaluate(model, test_loader, criterion, device)
 
     print(f"  [{name}] TEST  acc={test_metrics['accuracy']:.4f}  "
           f"f1={test_metrics['f1']:.4f}  auc={test_metrics['auc']:.4f}")
 
-    return {"test": test_metrics, "history": history, "checkpoint": ckpt_path}
+    # --- Save results to JSON for persistence across kernel restarts ---
+    result = {"test": test_metrics, "history": history, "checkpoint": ckpt_path,
+              "y_true": y_true, "y_prob": y_prob}
+    results_path = os.path.join(save_dir, f"{name}_results.json")
+    with open(results_path, "w") as f:
+        json.dump(result, f, indent=2)
+
+    return result

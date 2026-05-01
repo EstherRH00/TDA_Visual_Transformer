@@ -6,6 +6,25 @@ Date: 2026-04-30
 Project: Topological image feature extraction for Visual Transformer Breast Cancer Classification
 
 ================================================================================
+0. SETUP
+================================================================================
+
+  Install all dependencies:
+    pip install -r requirements.txt
+
+  If using a conda environment (e.g., "vit_tda"):
+    conda activate vit_tda
+    pip install -r requirements.txt
+
+  Key dependencies:
+    - torch, torchvision, timm: ViT model and training
+    - giotto-tda: TDA persistence computation (for future E3–E8)
+    - pydicom: loading CBIS-DDSM DICOM files
+    - opencv-python: image resizing and preprocessing (CLAHE, blur)
+    - scikit-learn: stratified splits, evaluation metrics
+    - pandas: data manifests and CSV handling
+
+================================================================================
 1. THESIS OVERVIEW
 ================================================================================
 
@@ -147,11 +166,20 @@ Problems with the original notebook training cells:
 
 New infrastructure (in src/):
 
+  src/utils/image_utils.py — Utility functions:
+    - load_dicom(): loads a DICOM file and normalizes to 0-255 uint8
+    - get_all_dcm_files_with_size(): shared helper, lists DCMs sorted by size
+    - resolve_cropped_mamogram_path(): picks smallest file = pre-cropped lesion
+    - resolve_cropped_mamogram_and_roi_mask_path(): returns (crop, mask)
+    - encode_label(): converts pathology string to 0/1
+    - cache_images_as_np_arrays(): batch-caches pre-cropped lesions as .npy
+    - extract_roi_crop(): crops full mammogram using mask → (roi_crop, masked_crop)
+
   src/datasets/experiment_dataset.py — ExperimentDataset class
-    - Loads precomputed .npy ROI crops
-    - Optionally applies preprocessing on the fly
+    - Loads precomputed .npy pre-cropped lesion images
+    - Optionally applies preprocessing on the fly (CLAHE + denoise)
     - Optionally loads TDA vectors
-    - Data augmentation for training (flip)
+    - Data augmentation for training (horizontal + vertical flip)
     - Returns (img, label) or (img, tda, label)
 
   src/training/experiment_runner.py — run_experiment() function
@@ -168,15 +196,40 @@ New infrastructure (in src/):
 7. PIPELINE EXECUTION ORDER
 ================================================================================
 
-  1. Run "Test 1" cell — verify extract_roi_crop works on a sample
-  2. Run Step 1 — precompute all ROI crops and masked crops → roi_manifest.csv
-  3. Run E1 & E2 — ViT-only experiments (no TDA needed)
-  4. Run Step 2b — precompute TDA persistence images for all samples
-  5. Run E3–E8 — all TDA experiments
-  6. View results summary table
+  1. Run "Test 1" cells — explore the data (mammogram, mask, crop, masked crop)
+  2. Run Step 1 — cache pre-cropped lesions as .npy (train + test)
+  3. Run E1 — ViT baseline (no preprocessing, no TDA)
+  4. Run E2 — ViT + preprocessing (CLAHE + denoise, no TDA)
+  5. (Future) Precompute TDA persistence images
+  6. (Future) Run E3–E8 — TDA experiments
+  7. View results summary table
 
 ================================================================================
-8. KNOWN ISSUES / TODO
+8. FILE STRUCTURE
+================================================================================
+
+  Active source files:
+    src/utils/image_utils.py        — DICOM loading, path resolution, caching, ROI extraction
+    src/preprocessing/preprocess.py — CLAHE + Gaussian blur preprocessing
+    src/models/vit_model.py         — ViTClassifier (ViT-B/16, binary classification head)
+    src/models/fusion_model.py      — FusionModel (ViT + TDA branch, concatenation classifier)
+    src/datasets/experiment_dataset.py — ExperimentDataset (loads .npy, preprocessing, augmentation)
+    src/training/experiment_runner.py  — run_experiment() (train/val split, early stopping, eval)
+    src/tda/tda_features.py         — compute_persistence_image() (for future E3–E8)
+
+  Deleted (superseded by the above):
+    src/datasets/dataset.py         — old MammographyDataset, replaced by experiment_dataset.py
+    src/training/train.py           — old train() function, replaced by experiment_runner.py
+    src/evaluation/metrics.py       — old compute_metrics(), now inside experiment_runner.evaluate()
+    main.py                         — old entry point, everything runs from notebook.ipynb
+    experiments/config.yaml         — was empty, config is passed as dicts in notebook cells
+
+  Notebook: notebook.ipynb          — all experiments run from here
+
+  Seed: 2 (used consistently across all experiments and the runner default)
+
+================================================================================
+9. KNOWN ISSUES / TODO
 ================================================================================
 
   - FusionModel constructor hardcodes tda_fc input to 100; the experiment
@@ -187,6 +240,6 @@ New infrastructure (in src/):
     comparisons not yet implemented.
   - Thesis chapters 3-6 still need to be written based on these results.
   - Some CBIS-DDSM folders have only 1 DICOM file (not 2) — these are
-    skipped with a warning during preprocessing.
+    skipped with a warning during caching.
 
 ================================================================================
