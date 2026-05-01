@@ -208,3 +208,30 @@ only the folder matters. The actual DICOM filenames differ from the CSV.
   - Thesis chapters 3–6 need to be written based on results.
 
 ================================================================================
+9. LICENSING & CITATIONS
+================================================================================
+
+  CBIS-DDSM is licensed under CC BY 3.0 (Creative Commons Attribution 3.0).
+  This applies to the DATA only, not to your code.
+
+  Required citations (must appear in thesis bibliography):
+
+  Data citation:
+    Sawyer-Lee, R., Gimenez, F., Hoogi, A., & Rubin, D. (2016).
+    Curated Breast Imaging Subset of Digital Database for Screening
+    Mammography (CBIS-DDSM) [Data set]. The Cancer Imaging Archive.
+    https://doi.org/10.7937/K9/TCIA.2016.7O02S9CY
+
+  Publication citation:
+    Lee, R. S., Gimenez, F., Hoogi, A., Miyake, K. K., Gorovoy, M.,
+    & Rubin, D. L. (2017). A curated mammography data set for use in
+    computer-aided detection and diagnosis research. Scientific Data,
+    4(1). https://doi.org/10.1038/sdata.2017.177
+
+  TODO: Add a note to README.md:
+    "This project uses the CBIS-DDSM dataset, licensed under CC BY 3.0.
+     Citation: Sawyer-Lee et al. (2016), DOI: 10.7937/K9/TCIA.2016.7O02S9CY"
+
+  Your own code does NOT need any special license because of the dataset.
+
+================================================================================
