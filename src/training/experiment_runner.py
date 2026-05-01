@@ -1,0 +1,167 @@
+import os
+import copy
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, Subset
+from sklearn.model_selection import StratifiedShuffleSplit
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+
+
+def get_class_weights(labels):
+    """Compute pos_weight for BCEWithLogitsLoss to handle class imbalance."""
+    labels = np.array(labels)
+    n_neg = (labels == 0).sum()
+    n_pos = (labels == 1).sum()
+    return torch.tensor([n_neg / max(n_pos, 1)], dtype=torch.float32)
+
+
+def train_one_epoch(model, dataloader, optimizer, criterion, device):
+    model.train()
+    total_loss = 0.0
+    for batch in dataloader:
+        if len(batch) == 3:
+            x, tda, y = batch
+            x, tda, y = x.to(device), tda.to(device), y.to(device)
+            out = model(x, tda)
+        else:
+            x, y = batch
+            x, y = x.to(device), y.to(device)
+            out = model(x)
+        loss = criterion(out.squeeze(), y)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+    return total_loss / len(dataloader)
+
+
+@torch.no_grad()
+def evaluate(model, dataloader, criterion, device):
+    model.eval()
+    total_loss = 0.0
+    all_y, all_p = [], []
+    for batch in dataloader:
+        if len(batch) == 3:
+            x, tda, y = batch
+            x, tda, y = x.to(device), tda.to(device), y.to(device)
+            out = model(x, tda)
+        else:
+            x, y = batch
+            x, y = x.to(device), y.to(device)
+            out = model(x)
+        loss = criterion(out.squeeze(), y)
+        total_loss += loss.item()
+        probs = torch.sigmoid(out.squeeze()).cpu().numpy()
+        all_p.extend(probs.tolist() if probs.ndim > 0 else [probs.item()])
+        all_y.extend(y.cpu().numpy().tolist() if y.ndim > 0 else [y.cpu().item()])
+
+    all_y = np.array(all_y)
+    all_p = np.array(all_p)
+    preds = (all_p > 0.5).astype(int)
+
+    metrics = {
+        "loss": total_loss / len(dataloader),
+        "accuracy": accuracy_score(all_y, preds),
+        "f1": f1_score(all_y, preds, zero_division=0),
+        "auc": roc_auc_score(all_y, all_p) if len(np.unique(all_y)) > 1 else 0.0,
+    }
+    return metrics
+
+
+def run_experiment(model_fn, train_dataset, test_dataset, config):
+    """
+    Run a single experiment with train/val split, early stopping, and evaluation.
+
+    Args:
+        model_fn: callable that returns a fresh model instance
+        train_dataset: full training dataset (will be split into train/val)
+        test_dataset: held-out test dataset
+        config: dict with keys:
+            - seed (int)
+            - epochs (int, default 30)
+            - patience (int, default 5)
+            - lr (float, default 1e-4)
+            - batch_size (int, default 16)
+            - save_dir (str, default "checkpoints")
+            - experiment_name (str)
+    """
+    seed = config.get("seed", 42)
+    epochs = config.get("epochs", 2)
+    patience = config.get("patience", 5)
+    lr = config.get("lr", 1e-4)
+    batch_size = config.get("batch_size", 16)
+    save_dir = config.get("save_dir", "checkpoints")
+    name = config.get("experiment_name", "experiment")
+
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # --- Train/Val split (stratified 85/15) ---
+    labels = [train_dataset.labels[i] for i in range(len(train_dataset))]
+    sss = StratifiedShuffleSplit(n_splits=1, test_size=0.15, random_state=seed)
+    train_idx, val_idx = next(sss.split(np.zeros(len(labels)), labels))
+
+    train_sub = Subset(train_dataset, train_idx)
+    val_sub = Subset(train_dataset, val_idx)
+
+    train_loader = DataLoader(train_sub, batch_size=batch_size, shuffle=True,
+                              num_workers=0, pin_memory=True)
+    val_loader = DataLoader(val_sub, batch_size=batch_size, shuffle=False,
+                            num_workers=0, pin_memory=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
+                             num_workers=0, pin_memory=True)
+
+    # --- Model, loss, optimizer ---
+    model = model_fn().to(device)
+    pos_weight = get_class_weights(labels).to(device)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+
+    # --- Training loop with early stopping ---
+    best_val_loss = float("inf")
+    best_state = None
+    wait = 0
+
+    os.makedirs(save_dir, exist_ok=True)
+    ckpt_path = os.path.join(save_dir, f"{name}_best.pt")
+
+    history = {"train_loss": [], "val_loss": [], "val_auc": []}
+
+    for epoch in range(1, epochs + 1):
+        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device)
+        val_metrics = evaluate(model, val_loader, criterion, device)
+        scheduler.step()
+
+        history["train_loss"].append(train_loss)
+        history["val_loss"].append(val_metrics["loss"])
+        history["val_auc"].append(val_metrics["auc"])
+
+        print(f"  [{name}] Epoch {epoch}/{epochs}  "
+              f"train_loss={train_loss:.4f}  "
+              f"val_loss={val_metrics['loss']:.4f}  "
+              f"val_auc={val_metrics['auc']:.4f}")
+
+        if val_metrics["loss"] < best_val_loss:
+            best_val_loss = val_metrics["loss"]
+            best_state = copy.deepcopy(model.state_dict())
+            wait = 0
+        else:
+            wait += 1
+            if wait >= patience:
+                print(f"  [{name}] Early stopping at epoch {epoch}")
+                break
+
+    # --- Save best & evaluate on test ---
+    torch.save(best_state, ckpt_path)
+    model.load_state_dict(best_state)
+    test_metrics = evaluate(model, test_loader, criterion, device)
+
+    print(f"  [{name}] TEST  acc={test_metrics['accuracy']:.4f}  "
+          f"f1={test_metrics['f1']:.4f}  auc={test_metrics['auc']:.4f}")
+
+    return {"test": test_metrics, "history": history, "checkpoint": ckpt_path}

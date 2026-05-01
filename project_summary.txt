@@ -1,0 +1,192 @@
+================================================================================
+TFM PROJECT SUMMARY — Decisions, Rationale, and Experiment Design
+================================================================================
+
+Date: 2026-04-30
+Project: Topological image feature extraction for Visual Transformer Breast Cancer Classification
+
+================================================================================
+1. THESIS OVERVIEW
+================================================================================
+
+Goal: Evaluate whether incorporating image preprocessing and Topological Data
+Analysis (TDA) features into a Vision Transformer (ViT) improves binary
+classification of mammographic images (benign vs malignant).
+
+Two hypotheses:
+  H1: Preprocessing (CLAHE + denoising) improves ViT classification.
+  H2: TDA-derived topological descriptors provide complementary structural
+      information that improves classification beyond what ViT alone captures.
+
+Dataset: CBIS-DDSM (mass cases only for now, calcifications deferred).
+
+================================================================================
+2. DATA: WHY ROI CROPS INSTEAD OF FULL MAMMOGRAMS
+================================================================================
+
+CBIS-DDSM provides per lesion:
+  - Full mammogram (via "image file path" column)
+  - Binary ROI mask (via "ROI mask file path" column)
+
+Each CSV path points to a folder with 2 DICOM files. The filename in the CSV
+is irrelevant — only the folder matters. Both CSV columns ("image file path"
+and "ROI mask file path") point to the SAME folder, just with different fake
+filenames. The folder always contains exactly 2 DICOM files:
+  - SMALLER file = the mammogram
+  - BIGGER file = the ROI mask
+
+This is handled by resolve_both_paths() in image_utils.py, which takes any
+CSV path, navigates to the folder, sorts by file size, and returns
+(mammogram_path, mask_path). You only need one of the CSV columns to get both.
+
+Decision: Use ROI crops extracted from the full mammogram, NOT the raw
+full mammogram and NOT the pre-cropped images from CBIS-DDSM.
+
+Rationale:
+  - Full mammograms are ~3000x5000 pixels. Resizing to 224x224 for ViT
+    destroys lesion detail (the lesion becomes ~5-10 pixels).
+  - Prior papers in the thesis literature review all work with ROI regions,
+    so results are directly comparable.
+  - ViT attention would waste capacity on background breast tissue.
+  - The CBIS-DDSM pre-cropped images are tight lesion crops with no context.
+    We want SOME surrounding tissue context for the ViT.
+
+Approach: Use the binary mask to find the bounding box of the lesion, then
+crop that region from the full mammogram with 15% padding. This gives a
+crop centered on the lesion with local tissue context.
+
+The function extract_roi_crop() returns TWO outputs:
+  1. roi_crop — mammogram region around the lesion (ViT input for all experiments)
+  2. masked_crop — same region with mask applied, so only lesion pixels have
+     real values and surrounding tissue is zeroed out (TDA input for E5-E8)
+
+================================================================================
+3. EXPERIMENT DESIGN
+================================================================================
+
+Constants across all experiments:
+  - Dataset: CBIS-DDSM mass cases, respecting official train/test split
+  - Model backbone: ViT-B/16, pretrained on ImageNet, fine-tuned
+  - Input size: 224x224
+  - Metrics: Accuracy, F1, AUC
+  - Training: Same optimizer (Adam, lr=1e-4), cosine LR scheduler,
+    early stopping (patience=5), class-weighted loss
+  - Train split further divided 85/15 stratified for train/val
+  - Data augmentation: horizontal + vertical flip (image branch only)
+
+Table of experiments:
+
+  ID | ViT Input          | Preprocess | TDA Branch | TDA Computed On     | Model
+  ---|--------------------|------------|------------|---------------------|---------------
+  E1 | ROI crop (raw)     | No         | No         | —                   | ViTClassifier
+  E2 | ROI crop (preproc) | Yes        | No         | —                   | ViTClassifier
+  E3 | ROI crop (raw)     | No         | Yes        | Full ROI crop       | FusionModel
+  E4 | ROI crop (preproc) | Yes        | Yes        | Full ROI crop       | FusionModel
+  E5 | ROI crop (raw)     | No         | Yes        | Masked crop         | FusionModel
+  E6 | ROI crop (preproc) | Yes        | Yes        | Masked crop         | FusionModel
+  E7 | ROI crop (raw)     | No         | Yes        | Full + Masked (cat) | FusionModel
+  E8 | ROI crop (preproc) | Yes        | Yes        | Full + Masked (cat) | FusionModel
+
+What each comparison tests:
+  E1 vs E2 → H1 (does preprocessing help?) in isolation
+  E1 vs E3 → H2 (does TDA help?) in isolation
+  E2 vs E4 → H2 when preprocessing is already applied
+  E3 vs E5 → Is masked TDA better than full-image TDA?
+  E4 vs E6 → Same comparison, with preprocessing
+  E5 vs E7 → Does adding full-image TDA on top of masked TDA help?
+  E6 vs E8 → The "kitchen sink" — does everything together beat the best subset?
+
+================================================================================
+4. PREPROCESSING
+================================================================================
+
+Applied to the ROI crop (not the mask, not the TDA input):
+  - CLAHE (Contrast Limited Adaptive Histogram Equalization): enhances local
+    contrast, reveals fine tissue detail. clipLimit=2.0, tileGridSize=(8,8).
+  - Gaussian blur (5x5): reduces noise.
+
+This matches what the thesis describes and what prior CBIS-DDSM papers use.
+Applied on-the-fly in the dataset class (not precomputed) so we can toggle
+it per experiment.
+
+================================================================================
+5. TDA PIPELINE
+================================================================================
+
+For each image (ROI crop or masked crop):
+  1. Resize to 224x224 (manageable for cubical persistence)
+  2. Compute cubical persistence using giotto-tda (CubicalPersistence)
+     — captures H0 (connected components) and H1 (holes/loops)
+  3. Convert persistence diagram to persistence image (PersistenceImage)
+  4. Flatten the PI into a vector
+
+Persistence images are PRECOMPUTED and saved as .npy files to avoid
+recomputing during training (cubical persistence is expensive).
+
+The FusionModel architecture:
+  - ViT backbone (head removed) → 768-dim feature vector
+  - TDA branch: Linear(PI_dim → 128)
+  - Concatenate: 768 + 128 = 896
+  - Classifier: Linear(896 → 256) → ReLU → Linear(256 → 1)
+
+For E7/E8, the TDA input is the concatenation of full ROI PI and masked PI,
+so the TDA branch input dimension doubles.
+
+================================================================================
+6. TRAINING INFRASTRUCTURE
+================================================================================
+
+Problems with the original notebook training cells:
+  - No train/val split (trained and evaluated on same data)
+  - No early stopping
+  - model.train() called once outside loop, never paired with model.eval()
+  - No class imbalance handling
+  - No LR scheduler
+  - No checkpointing
+  - Duplicated code blocks
+
+New infrastructure (in src/):
+
+  src/datasets/experiment_dataset.py — ExperimentDataset class
+    - Loads precomputed .npy ROI crops
+    - Optionally applies preprocessing on the fly
+    - Optionally loads TDA vectors
+    - Data augmentation for training (flip)
+    - Returns (img, label) or (img, tda, label)
+
+  src/training/experiment_runner.py — run_experiment() function
+    - Stratified 85/15 train/val split
+    - Class-weighted BCEWithLogitsLoss
+    - Proper model.train()/model.eval() per epoch
+    - Early stopping with patience
+    - Cosine annealing LR scheduler
+    - Saves best model checkpoint
+    - Evaluates on held-out test set
+    - Returns test metrics + training history
+
+================================================================================
+7. PIPELINE EXECUTION ORDER
+================================================================================
+
+  1. Run "Test 1" cell — verify extract_roi_crop works on a sample
+  2. Run Step 1 — precompute all ROI crops and masked crops → roi_manifest.csv
+  3. Run E1 & E2 — ViT-only experiments (no TDA needed)
+  4. Run Step 2b — precompute TDA persistence images for all samples
+  5. Run E3–E8 — all TDA experiments
+  6. View results summary table
+
+================================================================================
+8. KNOWN ISSUES / TODO
+================================================================================
+
+  - FusionModel constructor hardcodes tda_fc input to 100; the experiment
+    cells override this, but the class should accept tda_input_dim as a param.
+  - Only mass cases for now; calcifications deferred.
+  - Should run each experiment with 3+ seeds and report mean ± std.
+  - Statistical tests (McNemar for accuracy, DeLong for AUC) for pairwise
+    comparisons not yet implemented.
+  - Thesis chapters 3-6 still need to be written based on these results.
+  - Some CBIS-DDSM folders have only 1 DICOM file (not 2) — these are
+    skipped with a warning during preprocessing.
+
+================================================================================
