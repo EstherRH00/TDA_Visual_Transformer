@@ -2,8 +2,9 @@
 TFM PROJECT SUMMARY — Decisions, Rationale, and Experiment Design
 ================================================================================
 
-Date: 2026-04-30
-Project: Topological image feature extraction for Visual Transformer Breast Cancer Classification
+Date: 2026-05-01 (updated)
+Project: Topological image feature extraction for Visual Transformer
+         Breast Cancer Classification
 
 ================================================================================
 0. SETUP
@@ -40,182 +41,170 @@ Two hypotheses:
 Dataset: CBIS-DDSM (mass cases only for now, calcifications deferred).
 
 ================================================================================
-2. DATA: WHY ROI CROPS INSTEAD OF FULL MAMMOGRAMS
+2. DATA: CBIS-DDSM FOLDER STRUCTURE
 ================================================================================
 
-CBIS-DDSM provides per lesion:
-  - Full mammogram (via "image file path" column)
-  - Binary ROI mask (via "ROI mask file path" column)
+Each CSV row has three path columns. The filename in each path is irrelevant —
+only the folder matters. The actual DICOM filenames differ from the CSV.
 
-Each CSV path points to a folder with 2 DICOM files. The filename in the CSV
-is irrelevant — only the folder matters. Both CSV columns ("image file path"
-and "ROI mask file path") point to the SAME folder, just with different fake
-filenames. The folder always contains exactly 2 DICOM files:
-  - SMALLER file = the mammogram
-  - BIGGER file = the ROI mask
+  "image file path" folder:
+    - Contains 1 DICOM file = the FULL MAMMOGRAM (e.g., 4808×3024)
 
-This is handled by resolve_both_paths() in image_utils.py, which takes any
-CSV path, navigates to the folder, sorts by file size, and returns
-(mammogram_path, mask_path). You only need one of the CSV columns to get both.
+  "cropped image file path" folder:
+    - Sometimes contains 1 file, sometimes 2 files
+    - When 2 files: SMALLER = pre-cropped lesion, BIGGER = ROI mask
+    - When 1 file: it is the pre-cropped lesion
 
-Decision: Use ROI crops extracted from the full mammogram, NOT the raw
-full mammogram and NOT the pre-cropped images from CBIS-DDSM.
+  "ROI mask file path" folder:
+    - Sometimes the SAME folder as "cropped image file path"
+    - Sometimes a DIFFERENT folder
+    - When 2 files: BIGGER = ROI mask
+    - When 1 file: it is the ROI mask
 
-Rationale:
-  - Full mammograms are ~3000x5000 pixels. Resizing to 224x224 for ViT
-    destroys lesion detail (the lesion becomes ~5-10 pixels).
-  - Prior papers in the thesis literature review all work with ROI regions,
-    so results are directly comparable.
-  - ViT attention would waste capacity on background breast tissue.
-  - The CBIS-DDSM pre-cropped images are tight lesion crops with no context.
-    We want SOME surrounding tissue context for the ViT.
-
-Approach: Use the binary mask to find the bounding box of the lesion, then
-crop that region from the full mammogram with 15% padding. This gives a
-crop centered on the lesion with local tissue context.
-
-The function extract_roi_crop() returns TWO outputs:
-  1. roi_crop — mammogram region around the lesion (ViT input for all experiments)
-  2. masked_crop — same region with mask applied, so only lesion pixels have
-     real values and surrounding tissue is zeroed out (TDA input for E5-E8)
+  This variability is handled by:
+    - resolve_cropped_mamogram_path(): always picks smallest file (works for 1 or 2 files)
+    - resolve_roi_mask_path(): picks biggest if 2 files, only file if 1 file
+    - resolve_mamogram_path(): expects exactly 1 file (the full mammogram)
 
 ================================================================================
-3. EXPERIMENT DESIGN
+3. WHAT THE ViT SEES (KEY DESIGN DECISION)
 ================================================================================
 
-Constants across all experiments:
-  - Dataset: CBIS-DDSM mass cases, respecting official train/test split
-  - Model backbone: ViT-B/16, pretrained on ImageNet, fine-tuned
-  - Input size: 224x224
-  - Metrics: Accuracy, F1, AUC
-  - Training: Same optimizer (Adam, lr=1e-4), cosine LR scheduler,
-    early stopping (patience=5), class-weighted loss
-  - Train split further divided 85/15 stratified for train/val
-  - Data augmentation: horizontal + vertical flip (image branch only)
+  For the ViT input in ALL experiments (E1–E8), we use the PRE-CROPPED LESION
+  (from resolve_cropped_mamogram_path). Reasons:
 
-Table of experiments:
+  1. ViT divides input into 16×16 patches. The lesion needs to fill a
+     meaningful portion of the 224×224 input.
+  2. Full mammograms (~4800×3000) resized to 224×224 would shrink the lesion
+     to a few pixels — useless for ViT attention.
+  3. Pre-cropped images are what prior CBIS-DDSM papers use → comparable.
+  4. The pre-crop includes some surrounding tissue context.
 
-  ID | ViT Input          | Preprocess | TDA Branch | TDA Computed On     | Model
-  ---|--------------------|------------|------------|---------------------|---------------
-  E1 | ROI crop (raw)     | No         | No         | —                   | ViTClassifier
-  E2 | ROI crop (preproc) | Yes        | No         | —                   | ViTClassifier
-  E3 | ROI crop (raw)     | No         | Yes        | Full ROI crop       | FusionModel
-  E4 | ROI crop (preproc) | Yes        | Yes        | Full ROI crop       | FusionModel
-  E5 | ROI crop (raw)     | No         | Yes        | Masked crop         | FusionModel
-  E6 | ROI crop (preproc) | Yes        | Yes        | Masked crop         | FusionModel
-  E7 | ROI crop (raw)     | No         | Yes        | Full + Masked (cat) | FusionModel
-  E8 | ROI crop (preproc) | Yes        | Yes        | Full + Masked (cat) | FusionModel
-
-What each comparison tests:
-  E1 vs E2 → H1 (does preprocessing help?) in isolation
-  E1 vs E3 → H2 (does TDA help?) in isolation
-  E2 vs E4 → H2 when preprocessing is already applied
-  E3 vs E5 → Is masked TDA better than full-image TDA?
-  E4 vs E6 → Same comparison, with preprocessing
-  E5 vs E7 → Does adding full-image TDA on top of masked TDA help?
-  E6 vs E8 → The "kitchen sink" — does everything together beat the best subset?
+  For TDA masked experiments (future E5–E8):
+    Use full mammogram + mask via extract_roi_crop() to produce masked crops.
 
 ================================================================================
-4. PREPROCESSING
+4. EXPERIMENT DESIGN
 ================================================================================
 
-Applied to the ROI crop (not the mask, not the TDA input):
-  - CLAHE (Contrast Limited Adaptive Histogram Equalization): enhances local
-    contrast, reveals fine tissue detail. clipLimit=2.0, tileGridSize=(8,8).
-  - Gaussian blur (5x5): reduces noise.
+  Constants:
+    - Dataset: CBIS-DDSM mass cases, official train/test split respected
+    - Model: ViT-B/16, pretrained on ImageNet, fine-tuned
+    - Input: 224×224, grayscale stacked to 3 channels
+    - Loss: BCEWithLogitsLoss with class weights for imbalance
+    - Optimizer: Adam, lr=1e-4, cosine annealing scheduler
+    - Train split: 85/15 stratified for train/val
+    - Early stopping: patience=5 on val loss
+    - Augmentation: horizontal + vertical flip (train only)
+    - Seed: 2
+    - Metrics: Accuracy, F1, AUC
 
-This matches what the thesis describes and what prior CBIS-DDSM papers use.
-Applied on-the-fly in the dataset class (not precomputed) so we can toggle
-it per experiment.
-
-================================================================================
-5. TDA PIPELINE
-================================================================================
-
-For each image (ROI crop or masked crop):
-  1. Resize to 224x224 (manageable for cubical persistence)
-  2. Compute cubical persistence using giotto-tda (CubicalPersistence)
-     — captures H0 (connected components) and H1 (holes/loops)
-  3. Convert persistence diagram to persistence image (PersistenceImage)
-  4. Flatten the PI into a vector
-
-Persistence images are PRECOMPUTED and saved as .npy files to avoid
-recomputing during training (cubical persistence is expensive).
-
-The FusionModel architecture:
-  - ViT backbone (head removed) → 768-dim feature vector
-  - TDA branch: Linear(PI_dim → 128)
-  - Concatenate: 768 + 128 = 896
-  - Classifier: Linear(896 → 256) → ReLU → Linear(256 → 1)
-
-For E7/E8, the TDA input is the concatenation of full ROI PI and masked PI,
-so the TDA branch input dimension doubles.
+  Experiments:
+    E1: ViT baseline (no preprocessing, no TDA)         ← DONE
+    E2: ViT + preprocessing (CLAHE + denoise)            ← DONE
+    E3: ViT + TDA on full ROI crop                       ← TODO
+    E4: ViT + preprocessing + TDA on full ROI crop       ← TODO
+    E5: ViT + TDA on masked crop                         ← TODO
+    E6: ViT + preprocessing + TDA on masked crop         ← TODO
+    E7: ViT + TDA on full + masked (concatenated)        ← TODO
+    E8: ViT + preprocessing + TDA on full + masked       ← TODO
 
 ================================================================================
-6. TRAINING INFRASTRUCTURE
+5. E1 AND E2 RESULTS ANALYSIS
 ================================================================================
 
-Problems with the original notebook training cells:
-  - No train/val split (trained and evaluated on same data)
-  - No early stopping
-  - model.train() called once outside loop, never paired with model.eval()
-  - No class imbalance handling
-  - No LR scheduler
-  - No checkpointing
-  - Duplicated code blocks
+  E1 (ViT baseline, no preprocessing):
+    - Trained for 6 epochs (early stopping triggered at epoch 6, patience=5
+      from epoch 1 since val loss barely improved)
+    - Test: ACC=0.3995, F1=0.5505, AUC=0.5346
+    - Val AUC peaked around 0.63
+    - VERY POOR — barely above random (AUC 0.5)
 
-New infrastructure (in src/):
+  E2 (ViT + CLAHE + denoise):
+    - Trained for 26 epochs (early stopping at epoch 26)
+    - Test: ACC=0.6720, F1=0.6196, AUC=0.7228
+    - Val AUC peaked around 0.77
+    - SIGNIFICANTLY BETTER than E1 — preprocessing helps a lot (supports H1)
 
-  src/utils/image_utils.py — Utility functions:
-    - load_dicom(): loads a DICOM file and normalizes to 0-255 uint8
-    - get_all_dcm_files_with_size(): shared helper, lists DCMs sorted by size
-    - resolve_cropped_mamogram_path(): picks smallest file = pre-cropped lesion
-    - resolve_cropped_mamogram_and_roi_mask_path(): returns (crop, mask)
-    - encode_label(): converts pathology string to 0/1
-    - cache_images_as_np_arrays(): batch-caches pre-cropped lesions as .npy
-    - extract_roi_crop(): crops full mammogram using mask → (roi_crop, masked_crop)
+  Comparison with cited papers:
+    Paper 1 (VGG16 + transfer learning + heavy augmentation): AUC=0.844
+    Paper 2 (EfficientNet-B2, minimal augmentation):          AUC=0.679
+    Paper 3 (BiT + attention + text metadata):                AUC=0.878
 
-  src/datasets/experiment_dataset.py — ExperimentDataset class
-    - Loads precomputed .npy pre-cropped lesion images
-    - Optionally applies preprocessing on the fly (CLAHE + denoise)
-    - Optionally loads TDA vectors
-    - Data augmentation for training (horizontal + vertical flip)
-    - Returns (img, label) or (img, tda, label)
+  E2's AUC of 0.72 is in the same ballpark as Paper 2 (0.68), which also
+  used minimal augmentation. Papers 1 and 3 achieved much higher AUC through:
+    - Massive data augmentation (60K images from ~1K originals)
+    - Additional metadata (BI-RADS text descriptors)
+    - More sophisticated architectures and fine-tuning strategies
 
-  src/training/experiment_runner.py — run_experiment() function
-    - Stratified 85/15 train/val split
-    - Class-weighted BCEWithLogitsLoss
-    - Proper model.train()/model.eval() per epoch
-    - Early stopping with patience
-    - Cosine annealing LR scheduler
-    - Saves best model checkpoint
-    - Evaluates on held-out test set
-    - Returns test metrics + training history
+  E1's AUC of 0.53 is concerning but explainable:
+    - ViT-B/16 was pretrained on ImageNet (natural images), not medical images
+    - Without preprocessing, mammographic images have very low contrast —
+      the ViT's pretrained features don't transfer well to raw mammograms
+    - The dataset is small (~1K train samples) — ViT needs large data
+    - Only basic augmentation (flip) was used — no rotations, crops, etc.
+    - CLAHE dramatically improves contrast, making features more visible
+      to the pretrained ViT, which explains the E1→E2 jump
+
+  The E1→E2 improvement (AUC 0.53 → 0.72) strongly supports H1.
+
+================================================================================
+6. FILE STRUCTURE
+================================================================================
+
+  Active source files:
+    src/utils/image_utils.py          — DICOM loading, path resolution, caching
+    src/utils/preprocess.py           — CLAHE + Gaussian blur preprocessing
+    src/models/vit_model.py           — ViTClassifier (ViT-B/16, binary head)
+    src/models/fusion_model.py        — FusionModel (ViT + TDA branch)
+    src/datasets/experiment_dataset.py — ExperimentDataset (loads .npy, preprocess, augment)
+    src/training/experiment_runner.py  — run_experiment() (split, train, eval, save JSON)
+    src/tda/tda_features.py           — compute_persistence_image() (future E3–E8)
+
+  Notebook: notebook.ipynb — all experiments run from here
+  Results: checkpoints/*_results.json — metrics, history, predictions (survives kernel restarts)
+  Seed: 2
 
 ================================================================================
 7. PIPELINE EXECUTION ORDER
 ================================================================================
 
-  1. Run "Test 1" cells — explore the data (mammogram, mask, crop, masked crop)
+  1. Run data exploration cells (mammogram, mask, crop, masked crop visualization)
   2. Run Step 1 — cache pre-cropped lesions as .npy (train + test)
-  3. Run E1 — ViT baseline (no preprocessing, no TDA)
-  4. Run E2 — ViT + preprocessing (CLAHE + denoise, no TDA)
-  5. (Future) Precompute TDA persistence images
-  6. (Future) Run E3–E8 — TDA experiments
-  7. View results summary table
+  3. Run E1 — ViT baseline ← DONE
+  4. Run E2 — ViT + preprocessing ← DONE
+  5. Run results summary + visualization cells (loads from JSON)
+  6. (Future) Precompute TDA persistence images
+  7. (Future) Run E3–E8
+  8. (Future) Statistical comparison across experiments
 
 ================================================================================
-8. KNOWN ISSUES / TODO
+8. CONCERNS AND NEXT STEPS
 ================================================================================
 
-  - FusionModel constructor hardcodes tda_fc input to 100; the experiment
-    cells override this, but the class should accept tda_input_dim as a param.
-  - Only mass cases for now; calcifications deferred.
-  - Should run each experiment with 3+ seeds and report mean ± std.
-  - Statistical tests (McNemar for accuracy, DeLong for AUC) for pairwise
-    comparisons not yet implemented.
-  - Thesis chapters 3-6 still need to be written based on these results.
-  - Some CBIS-DDSM folders have only 1 DICOM file (not 2) — these are
-    skipped with a warning during caching.
+  Concerns:
+  - E1 performance is very poor (AUC 0.53). This is expected given raw
+    mammogram contrast + small dataset + ImageNet pretrained ViT, but worth
+    noting that the baseline is weak.
+  - Only basic augmentation (flip). Prior papers used rotations, shears,
+    zooms, elastic deformation — this could significantly improve results.
+  - No learning rate warmup. ViT fine-tuning often benefits from warmup.
+  - FusionModel tda_fc hardcodes input to 100 (overridden at runtime, but
+    the class should accept tda_input_dim as a constructor parameter).
+  - E2 checkpoint file is missing (only E1_best.pt exists in checkpoints/).
+    This may be because E2 ran but the .pt wasn't saved, or a path issue.
+
+  Next steps:
+  - Run E3–E8 with current augmentation (flip only) to test H2.
+  - Augmentation strategy: keep basic augmentation (flip) consistent across
+    all 8 experiments first. This ensures fair H1/H2 comparisons. After all
+    experiments are done, optionally re-run with stronger augmentation
+    (rotation, zoom, elastic deformation) as a robustness check to show
+    that H1/H2 conclusions hold regardless of augmentation level.
+  - Consider unfreezing fewer ViT layers initially (freeze most, fine-tune
+    only the head + last few blocks) to prevent overfitting on small data.
+  - Run each experiment with 3+ seeds and report mean ± std.
+  - Statistical tests (McNemar, DeLong) for pairwise comparisons.
+  - Thesis chapters 3–6 need to be written based on results.
 
 ================================================================================
