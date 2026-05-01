@@ -205,31 +205,7 @@ New infrastructure (in src/):
   7. View results summary table
 
 ================================================================================
-8. FILE STRUCTURE
-================================================================================
-
-  Active source files:
-    src/utils/image_utils.py        — DICOM loading, path resolution, caching, ROI extraction
-    src/preprocessing/preprocess.py — CLAHE + Gaussian blur preprocessing
-    src/models/vit_model.py         — ViTClassifier (ViT-B/16, binary classification head)
-    src/models/fusion_model.py      — FusionModel (ViT + TDA branch, concatenation classifier)
-    src/datasets/experiment_dataset.py — ExperimentDataset (loads .npy, preprocessing, augmentation)
-    src/training/experiment_runner.py  — run_experiment() (train/val split, early stopping, eval)
-    src/tda/tda_features.py         — compute_persistence_image() (for future E3–E8)
-
-  Deleted (superseded by the above):
-    src/datasets/dataset.py         — old MammographyDataset, replaced by experiment_dataset.py
-    src/training/train.py           — old train() function, replaced by experiment_runner.py
-    src/evaluation/metrics.py       — old compute_metrics(), now inside experiment_runner.evaluate()
-    main.py                         — old entry point, everything runs from notebook.ipynb
-    experiments/config.yaml         — was empty, config is passed as dicts in notebook cells
-
-  Notebook: notebook.ipynb          — all experiments run from here
-
-  Seed: 2 (used consistently across all experiments and the runner default)
-
-================================================================================
-9. KNOWN ISSUES / TODO
+8. KNOWN ISSUES / TODO
 ================================================================================
 
   - FusionModel constructor hardcodes tda_fc input to 100; the experiment

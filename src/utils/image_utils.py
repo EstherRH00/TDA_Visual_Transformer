@@ -41,31 +41,43 @@ def get_all_dcm_files_with_size(rel_path):
 
     return files_with_size
 
-def resolve_cropped_mamogram_path(rel_path):
+def resolve_mamogram_path(rel_path):
     files_with_size = get_all_dcm_files_with_size(rel_path)
 
-    if len(files_with_size) != 2:
-        raise Exception("Unexpected amount of files in:", files_with_size)
-
-    cropped_mamogram_path = files_with_size[0][0]
+    if(len(files_with_size) != 1):
+        raise Exception("Unexpected amount of files")
+    cropped_mamogram_path = files_with_size[0][0] 
 
     return cropped_mamogram_path
 
-def resolve_cropped_mamogram_and_roi_mask_path(rel_path):
+def resolve_cropped_mamogram_path(rel_path):
     files_with_size = get_all_dcm_files_with_size(rel_path)
 
-    if len(files_with_size) != 2:
-        raise Exception("Unexpected amount of files in:", files_with_size)
+    if(len(files_with_size) != 1 and len(files_with_size) != 2):
+        raise Exception("Unexpected amount of files")
+    
+    cropped_mamogram_path = files_with_size[0][0] # smallest = mammogram
 
-    cropped_mamogram_path = files_with_size[0][0]   # smallest = mammogram
-    mask_path = files_with_size[1][0]               # biggest = ROI mask
+    return cropped_mamogram_path
 
-    return cropped_mamogram_path, mask_path
+def resolve_roi_mask_path(rel_path):
+    files_with_size = get_all_dcm_files_with_size(rel_path)
+
+    if(len(files_with_size) != 1 and len(files_with_size) != 2):
+        raise Exception("Unexpected amount of files")
+    
+    mask_path = None
+    if len(files_with_size) == 2:
+        mask_path = files_with_size[1][0] # biggest = ROI mask
+    else:
+        mask_path = files_with_size[0][0]
+
+    return mask_path
 
 def encode_label(label):
     return 1 if label == "MALIGNANT" else 0
 
-def cache_images_as_np_arrays(save_dir, df):
+def cache_cropped_images_as_np_arrays(save_dir, df):
     os.makedirs(save_dir, exist_ok=True)
 
     image_paths = []
@@ -74,8 +86,7 @@ def cache_images_as_np_arrays(save_dir, df):
 
     for i, row in tqdm(df.iterrows()):
         try:
-            rel_path = row["cropped image file path"]
-            full_path = resolve_cropped_mamogram_path(rel_path)
+            full_path = resolve_cropped_mamogram_path(row["cropped image file path"])
 
             label = encode_label(row["pathology"])
 

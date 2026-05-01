@@ -3,7 +3,7 @@ import numpy as np
 import cv2
 import torch
 from torch.utils.data import Dataset
-from src.preprocessing.preprocess import preprocess
+from ..utils.preprocess import preprocess
 
 
 class ExperimentDataset(Dataset):
