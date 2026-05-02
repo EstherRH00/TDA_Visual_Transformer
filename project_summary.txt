@@ -62,16 +62,16 @@ only the folder matters. The actual DICOM filenames differ from the CSV.
     - When 1 file: it is the ROI mask
 
   This variability is handled by:
-    - resolve_cropped_mamogram_path(): always picks smallest file (works for 1 or 2 files)
+    - resolve_cropped_mammogram_path(): always picks smallest file (works for 1 or 2 files)
     - resolve_roi_mask_path(): picks biggest if 2 files, only file if 1 file
-    - resolve_mamogram_path(): expects exactly 1 file (the full mammogram)
+    - resolve_mammogram_path(): expects exactly 1 file (the full mammogram)
 
 ================================================================================
 3. WHAT THE ViT SEES (KEY DESIGN DECISION)
 ================================================================================
 
   For the ViT input in ALL experiments (E1–E8), we use the PRE-CROPPED LESION
-  (from resolve_cropped_mamogram_path). Reasons:
+  (from resolve_cropped_mammogram_path). Reasons:
 
   1. ViT divides input into 16×16 patches. The lesion needs to fill a
      meaningful portion of the 224×224 input.

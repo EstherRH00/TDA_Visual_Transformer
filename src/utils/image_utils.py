@@ -41,24 +41,24 @@ def get_all_dcm_files_with_size(rel_path):
 
     return files_with_size
 
-def resolve_mamogram_path(rel_path):
+def resolve_mammogram_path(rel_path):
     files_with_size = get_all_dcm_files_with_size(rel_path)
 
     if(len(files_with_size) != 1):
         raise Exception("Unexpected amount of files")
-    cropped_mamogram_path = files_with_size[0][0] 
+    cropped_mammogram_path = files_with_size[0][0] 
 
-    return cropped_mamogram_path
+    return cropped_mammogram_path
 
-def resolve_cropped_mamogram_path(rel_path):
+def resolve_cropped_mammogram_path(rel_path):
     files_with_size = get_all_dcm_files_with_size(rel_path)
 
     if(len(files_with_size) != 1 and len(files_with_size) != 2):
         raise Exception("Unexpected amount of files")
     
-    cropped_mamogram_path = files_with_size[0][0] # smallest = mammogram
+    cropped_mammogram_path = files_with_size[0][0] # smallest = mammogram
 
-    return cropped_mamogram_path
+    return cropped_mammogram_path
 
 def resolve_roi_mask_path(rel_path):
     files_with_size = get_all_dcm_files_with_size(rel_path)
@@ -74,10 +74,7 @@ def resolve_roi_mask_path(rel_path):
 
     return mask_path
 
-def encode_label(label):
-    return 1 if label == "MALIGNANT" else 0
-
-def cache_cropped_images_as_np_arrays(save_dir, df):
+def cache_cropped_mammogram_images_as_np_arrays(save_dir, df):
     os.makedirs(save_dir, exist_ok=True)
 
     image_paths = []
@@ -86,9 +83,9 @@ def cache_cropped_images_as_np_arrays(save_dir, df):
 
     for i, row in tqdm(df.iterrows()):
         try:
-            full_path = resolve_cropped_mamogram_path(row["cropped image file path"])
+            full_path = resolve_cropped_mammogram_path(row["cropped image file path"])
 
-            label = encode_label(row["pathology"])
+            label = 1 if row["pathology"] == "MALIGNANT" else 0
 
             image_paths.append(full_path)
             labels.append(label)
@@ -121,8 +118,7 @@ def extract_roi_crop(mammogram, mask, padding_ratio=0.15):
     Extract the ROI crop from a full mammogram using the binary mask.
     
     Returns:
-        roi_crop: cropped mammogram region around the lesion (ViT input)
-        masked_crop: same region with mask applied (TDA input for E5-E8)
+        masked_crop: cropped mammogram region with mask applied
     """
     rows = np.any(mask > 0, axis=1)
     cols = np.any(mask > 0, axis=0)
@@ -141,4 +137,4 @@ def extract_roi_crop(mammogram, mask, padding_ratio=0.15):
     mask_crop = mask[rmin:rmax, cmin:cmax]
     masked_crop = roi_crop * (mask_crop > 0).astype(np.float32)
     
-    return roi_crop, masked_crop
+    return masked_crop
