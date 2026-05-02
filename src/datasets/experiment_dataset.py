@@ -20,13 +20,15 @@ class ExperimentDataset(Dataset):
     """
 
     def __init__(self, roi_paths, labels, tda_paths=None,
-                 use_preprocessing=False, augment=False, aggressive_augmentation=False, img_size=224):
+                 use_preprocessing=False, augment=False, aggressive_augmentation=False,
+                 tda_as_image=False, img_size=224):
         self.roi_paths = roi_paths
         self.labels = labels
         self.tda_paths = tda_paths
         self.use_preprocessing = use_preprocessing
         self.augment = augment
         self.aggressive_augmentation = aggressive_augmentation
+        self.tda_as_image = tda_as_image
         self.img_size = img_size
 
     def __len__(self):
@@ -70,7 +72,9 @@ class ExperimentDataset(Dataset):
         label = torch.tensor(self.labels[idx], dtype=torch.float32)
 
         if self.tda_paths is not None:
-            tda = np.load(self.tda_paths[idx]).astype(np.float32).flatten()
+            tda = np.load(self.tda_paths[idx]).astype(np.float32)
+            if not self.tda_as_image:
+                tda = tda.flatten()
             tda = torch.from_numpy(tda)
             return img, tda, label
 

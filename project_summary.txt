@@ -102,42 +102,71 @@ only the folder matters. The actual DICOM filenames differ from the CSV.
   Experiments:
     H1 experiments (does preprocessing / augmentation help?):
       E1: ViT baseline (no preprocessing, basic augmentation: flip)    ← DONE
-      E2: ViT + preprocessing (CLAHE + denoise)                        ← DONE
-      E3: ViT + preprocessing + aggressive data augmentation           ← TODO
+      E2: ViT + preprocessing (CLAHE + denoise)                        ← DONE (best H1)
+      E3: ViT + preprocessing + aggressive data augmentation           ← DONE (worse than E2)
 
-    H2 experiments (does TDA help?):
-      E4: ViT (raw) + TDA on pre-cropped lesion                       ← TODO
-          (TDA computed on the same image the ViT sees)
-      E5: ViT (raw) + TDA on masked crop                              ← TODO
-          (TDA computed on extract_roi_crop output using full mammogram + mask,
-           captures lesion-only topology without surrounding tissue)
+    H2 experiments — Image-based TDA fusion (persistence images as 2D images to a second ViT):
+      E4: ViT (preprocessed) + PI of pre-cropped lesion → DualViTFusionModel  ← TODO
+      E5: ViT (preprocessed) + PI of masked crop → DualViTFusionModel         ← TODO
+
+    H2 experiments — Vector-based TDA fusion (compact descriptors to linear branch):
+      E6: ViT (preprocessed) + vector descriptors of pre-cropped lesion        ← TODO
+          (Betti curves + Landscapes + Silhouettes → ~1200-dim → FusionModel)
+      E7: ViT (preprocessed) + vector descriptors of masked crop               ← TODO
 
     Combined experiment:
-      E6: Best preprocessing (from E1/E2/E3) + best TDA (from E4/E5)  ← TODO
+      E8: Best combination from E4-E7 results                                  ← TODO
 
-  Fusion architecture decision:
-    We use LATE FUSION (FusionModel) rather than token-level fusion.
-    Rationale:
-    - TDA persistence images are feature vectors, not spatial signals —
-      patchifying them into 16×16 tokens is not meaningful.
-    - Token-level fusion would double sequence length (196→392 tokens),
-      quadrupling attention cost — likely to overfit on ~1K samples.
-    - Modifying timm ViT internals is fragile and risky for a thesis deadline.
-    - Late fusion cleanly isolates the TDA contribution: if E4/E5 beat E1,
-      it's because TDA adds information, not because of architecture tricks.
-    - Token-level fusion is noted as future work in the thesis.
+  Fusion architecture decisions:
+    - E4/E5: DualViTFusionModel — two ViT branches (one for mammogram,
+      one for persistence image as a 2D image), CLS tokens concatenated,
+      then classifier. Matches the TDA-ViT paper where PIs are treated
+      as images and encoded by a ViT. PIs are 2D spatial data (100×100)
+      so patchifying them into ViT tokens is meaningful.
 
-    Optional (depending on E4/E5 results):
-      E4b: E4 + preprocessing                                         ← CONDITIONAL
-      E5b: E5 + preprocessing                                         ← CONDITIONAL
+      PI channel construction: The PI has shape (2, 100, 100) — H0
+      (connected components) and H1 (loops/holes) as two separate channels.
+      ViT expects 3-channel input. We pad with a zero channel: [H0, H1, 0].
+
+      Why NOT stack (original_crop, H0, H1) into 3 channels for a single ViT:
+        - ViT's first layer is a Conv2d patch embedding (16×16×3 → 768-dim)
+          that mixes all 3 channels within each spatial patch.
+        - PIs live in persistence space (birth/death axes), NOT pixel space.
+          Position (50,50) in the PI has no spatial correspondence to
+          position (50,50) in the original image.
+        - Mixing semantically unrelated values at the patch level would
+          confuse the pretrained ImageNet weights, which expect correlated
+          RGB channels from natural images.
+        - Two separate ViTs allow each branch to learn its own patch
+          embedding appropriate for its modality.
+
+      Why zero-padding rather than (H0, H1, mean(H0,H1)):
+        - Simpler, and the ViT patch embedding will learn to ignore the
+          zero channel during fine-tuning. The third channel carries no
+          new information in either case (mean is redundant with H0+H1).
+        - Noted as a potential ablation: alternative 3rd channel strategies
+          (mean, max, or difference H0−H1) could be explored in future work.
+
+    - E6/E7: FusionModel (late fusion) — ViT for mammogram, linear layer
+      for compact TDA vector descriptors (1400-dim: Betti curves 2×100 +
+      Landscapes 2×500 + Silhouettes 2×100, for H0 and H1 each),
+      concatenated. Much less prone
+      to overfitting than flattening a 20,000-dim PI.
+    - Token-level fusion (single ViT, both token sequences) rejected:
+      risky timm modifications, doubles sequence length, doesn't cleanly
+      isolate TDA contribution. Noted as future work.
 
     Key comparisons:
       E1 vs E2 → H1: does preprocessing help? (answered: yes, AUC 0.53→0.72)
       E2 vs E3 → H1: does aggressive augmentation help further?
-      E1 vs E4 → H2: does TDA on cropped lesion help?
-      E1 vs E5 → H2: does TDA on masked crop help?
-      E4 vs E5 → which TDA input gives better topological features?
-      E6       → does combining the best of both worlds give the best result?
+      E1 vs E4 → H2: does image-based TDA (crop PI) help?
+      E1 vs E5 → H2: does image-based TDA (masked PI) help?
+      E4 vs E5 → which TDA source is better (crop vs masked)?
+      E1 vs E6 → H2: does vector-based TDA (crop) help?
+      E1 vs E7 → H2: does vector-based TDA (masked) help?
+      E4 vs E6 → which fusion strategy is better for crop TDA?
+      E5 vs E7 → which fusion strategy is better for masked TDA?
+      E8       → best of everything combined
 
 ================================================================================
 5. E1 AND E2 RESULTS ANALYSIS
@@ -186,10 +215,13 @@ only the folder matters. The actual DICOM filenames differ from the CSV.
     src/utils/image_utils.py          — DICOM loading, path resolution, caching
     src/utils/preprocess.py           — CLAHE + Gaussian blur preprocessing
     src/models/vit_model.py           — ViTClassifier (ViT-B/16, binary head)
-    src/models/fusion_model.py        — FusionModel (ViT + TDA branch)
-    src/datasets/experiment_dataset.py — ExperimentDataset (loads .npy, preprocess, augment)
+    src/models/fusion_model.py        — FusionModel (ViT + TDA linear branch)
+                                       DualViTFusionModel (two ViT branches for PI as image)
+    src/datasets/experiment_dataset.py — ExperimentDataset (loads .npy, preprocess, augment,
+                                         tda_as_image flag for 2D vs vector TDA)
     src/training/experiment_runner.py  — run_experiment() (split, train, eval, save JSON)
-    src/tda/tda_features.py           — compute_persistence_image() (future E3–E8)
+    src/tda/tda_features.py           — compute_persistence_image(), compute_vector_descriptors(),
+                                         precompute functions for PI and vector descriptors
 
   Notebook: notebook.ipynb — all experiments run from here
   Results: checkpoints/*_results.json — metrics, history, predictions (survives kernel restarts)
