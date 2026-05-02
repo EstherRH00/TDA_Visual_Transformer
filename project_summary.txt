@@ -100,14 +100,44 @@ only the folder matters. The actual DICOM filenames differ from the CSV.
     - Metrics: Accuracy, F1, AUC
 
   Experiments:
-    E1: ViT baseline (no preprocessing, no TDA)         ← DONE
-    E2: ViT + preprocessing (CLAHE + denoise)            ← DONE
-    E3: ViT + TDA on full ROI crop                       ← TODO
-    E4: ViT + preprocessing + TDA on full ROI crop       ← TODO
-    E5: ViT + TDA on masked crop                         ← TODO
-    E6: ViT + preprocessing + TDA on masked crop         ← TODO
-    E7: ViT + TDA on full + masked (concatenated)        ← TODO
-    E8: ViT + preprocessing + TDA on full + masked       ← TODO
+    H1 experiments (does preprocessing / augmentation help?):
+      E1: ViT baseline (no preprocessing, basic augmentation: flip)    ← DONE
+      E2: ViT + preprocessing (CLAHE + denoise)                        ← DONE
+      E3: ViT + preprocessing + aggressive data augmentation           ← TODO
+
+    H2 experiments (does TDA help?):
+      E4: ViT (raw) + TDA on pre-cropped lesion                       ← TODO
+          (TDA computed on the same image the ViT sees)
+      E5: ViT (raw) + TDA on masked crop                              ← TODO
+          (TDA computed on extract_roi_crop output using full mammogram + mask,
+           captures lesion-only topology without surrounding tissue)
+
+    Combined experiment:
+      E6: Best preprocessing (from E1/E2/E3) + best TDA (from E4/E5)  ← TODO
+
+  Fusion architecture decision:
+    We use LATE FUSION (FusionModel) rather than token-level fusion.
+    Rationale:
+    - TDA persistence images are feature vectors, not spatial signals —
+      patchifying them into 16×16 tokens is not meaningful.
+    - Token-level fusion would double sequence length (196→392 tokens),
+      quadrupling attention cost — likely to overfit on ~1K samples.
+    - Modifying timm ViT internals is fragile and risky for a thesis deadline.
+    - Late fusion cleanly isolates the TDA contribution: if E4/E5 beat E1,
+      it's because TDA adds information, not because of architecture tricks.
+    - Token-level fusion is noted as future work in the thesis.
+
+    Optional (depending on E4/E5 results):
+      E4b: E4 + preprocessing                                         ← CONDITIONAL
+      E5b: E5 + preprocessing                                         ← CONDITIONAL
+
+    Key comparisons:
+      E1 vs E2 → H1: does preprocessing help? (answered: yes, AUC 0.53→0.72)
+      E2 vs E3 → H1: does aggressive augmentation help further?
+      E1 vs E4 → H2: does TDA on cropped lesion help?
+      E1 vs E5 → H2: does TDA on masked crop help?
+      E4 vs E5 → which TDA input gives better topological features?
+      E6       → does combining the best of both worlds give the best result?
 
 ================================================================================
 5. E1 AND E2 RESULTS ANALYSIS

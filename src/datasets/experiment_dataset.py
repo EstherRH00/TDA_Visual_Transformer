@@ -20,13 +20,13 @@ class ExperimentDataset(Dataset):
     """
 
     def __init__(self, roi_paths, labels, tda_paths=None,
-                 use_preprocessing=False, augment=False, img_size=224):
+                 use_preprocessing=False, augment=False, aggressive_augmentation=False, img_size=224):
         self.roi_paths = roi_paths
         self.labels = labels
         self.tda_paths = tda_paths
         self.use_preprocessing = use_preprocessing
         self.augment = augment
-        # TODO add aggresive agumentation as an option
+        self.aggressive_augmentation = aggressive_augmentation
         self.img_size = img_size
 
     def __len__(self):
@@ -44,7 +44,24 @@ class ExperimentDataset(Dataset):
             if np.random.random() > 0.5:
                 img = np.flipud(img).copy()
 
-        # todo if self.aggressive augmentation
+        if self.aggressive_augmentation:
+            # Random rotation (±15 degrees, as in Paper 1)
+            angle = np.random.uniform(-15, 15)
+            h, w = img.shape[:2]
+            M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+            img = cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_REFLECT)
+            # Random zoom/crop (0.85–1.0 of original, then resize back)
+            scale = np.random.uniform(0.85, 1.0)
+            new_h, new_w = int(h * scale), int(w * scale)
+            top = np.random.randint(0, h - new_h + 1)
+            left = np.random.randint(0, w - new_w + 1)
+            img = img[top:top + new_h, left:left + new_w]
+            img = cv2.resize(img, (w, h))
+            # Random shear (small, ±0.1)
+            if np.random.random() > 0.5:
+                shear = np.random.uniform(-0.1, 0.1)
+                M_shear = np.float32([[1, shear, 0], [0, 1, 0]])
+                img = cv2.warpAffine(img, M_shear, (w, h), borderMode=cv2.BORDER_REFLECT)
 
         img = cv2.resize(img, (self.img_size, self.img_size))
         img = np.stack([img, img, img], axis=0).astype(np.float32) / 255.0

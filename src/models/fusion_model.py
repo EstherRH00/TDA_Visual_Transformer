@@ -9,8 +9,8 @@ class FusionModel(nn.Module):
         self.vit = timm.create_model('vit_base_patch16_224', pretrained=True)
         self.vit.head = nn.Identity()
 
-        self.tda_fc = nn.Linear(100, 128)  # adjust depending on PI size
-
+        self.tda_fc = nn.Linear(100, 128)
+        
         self.classifier = nn.Sequential(
             nn.Linear(768 + 128, 256),
             nn.ReLU(),
