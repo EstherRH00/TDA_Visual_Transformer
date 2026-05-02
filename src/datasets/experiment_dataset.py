@@ -26,6 +26,7 @@ class ExperimentDataset(Dataset):
         self.tda_paths = tda_paths
         self.use_preprocessing = use_preprocessing
         self.augment = augment
+        # TODO add aggresive agumentation as an option
         self.img_size = img_size
 
     def __len__(self):
@@ -42,6 +43,8 @@ class ExperimentDataset(Dataset):
                 img = np.fliplr(img).copy()
             if np.random.random() > 0.5:
                 img = np.flipud(img).copy()
+
+        # todo if self.aggressive augmentation
 
         img = cv2.resize(img, (self.img_size, self.img_size))
         img = np.stack([img, img, img], axis=0).astype(np.float32) / 255.0
