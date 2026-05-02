@@ -13,8 +13,8 @@ def compute_persistence_image(image):
 
     pi = PersistenceImage()
     pi_img = pi.fit_transform(diagrams)
-    print(pi_img.shape)
-    return pi_img[0]
+
+    return pi_img[0] # Shape is (1, 2, 100, 100)
 
 def precompute_tda_cropped_image(cache_csv_path, tda_dir):
     """Compute persistence images from the pre-cropped lesions."""
