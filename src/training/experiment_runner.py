@@ -11,7 +11,14 @@ from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
 
 def get_class_weights(labels):
-    """Compute pos_weight for BCEWithLogitsLoss to handle class imbalance."""
+    """Compute pos_weight for BCEWithLogitsLoss to handle class imbalance.
+
+    Args:
+        - labels: list or array of binary labels (0 or 1).
+
+    Returns:
+        - pos_weight: torch tensor with the ratio of negative to positive samples.
+    """
     labels = np.array(labels)
     n_neg = (labels == 0).sum()
     n_pos = (labels == 1).sum()
@@ -19,6 +26,20 @@ def get_class_weights(labels):
 
 
 def train_one_epoch(model, dataloader, optimizer, criterion, device):
+    """Run one training epoch over the dataloader.
+
+    Handles both 2-tuple (image, label) and 3-tuple (image, tda, label) batches.
+
+    Args:
+        - model: PyTorch model to train.
+        - dataloader: DataLoader yielding batches.
+        - optimizer: optimizer instance.
+        - criterion: loss function.
+        - device: 'cuda' or 'cpu'.
+
+    Returns:
+        - avg_loss: average training loss over all batches.
+    """
     model.train()
     total_loss = 0.0
     for batch in dataloader:
@@ -40,6 +61,19 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
 
 @torch.no_grad()
 def evaluate(model, dataloader, criterion, device):
+    """Evaluate the model on a dataloader, computing loss and classification metrics.
+
+    Args:
+        - model: PyTorch model to evaluate.
+        - dataloader: DataLoader yielding batches.
+        - criterion: loss function.
+        - device: 'cuda' or 'cpu'.
+
+    Returns:
+        - metrics: dict with 'loss', 'accuracy', 'f1', and 'auc'.
+        - y_true: list of ground-truth labels.
+        - y_prob: list of predicted probabilities.
+    """
     model.eval()
     total_loss = 0.0
     all_y, all_p = [], []
@@ -72,21 +106,20 @@ def evaluate(model, dataloader, criterion, device):
 
 
 def run_experiment(model_fn, train_dataset, test_dataset, config):
-    """
-    Run a single experiment with train/val split, early stopping, and evaluation.
+    """Orchestrate a full experiment: train/val split, training with early stopping, and test evaluation.
+
+    Results (metrics, history, predictions) are persisted to a JSON file for survival across kernel restarts.
 
     Args:
-        model_fn: callable that returns a fresh model instance
-        train_dataset: full training dataset (will be split into train/val)
-        test_dataset: held-out test dataset
-        config: dict with keys:
-            - seed (int)
-            - epochs (int, default 30)
-            - patience (int, default 5)
-            - lr (float, default 1e-4)
-            - batch_size (int, default 16)
-            - save_dir (str, default "checkpoints")
-            - experiment_name (str)
+        - model_fn: callable that returns a fresh model instance.
+        - train_dataset: full training dataset (will be split into train/val).
+        - test_dataset: held-out test dataset.
+        - config: dict with keys 'experiment_name' (str), 'seed' (int, default 2),
+          'epochs' (int, default 30), 'patience' (int, default 5), 'lr' (float, default 1e-4),
+          'batch_size' (int, default 16), 'save_dir' (str, default 'checkpoints').
+
+    Returns:
+        - result: dict with 'test' (metrics), 'history', 'checkpoint' path, 'y_true', 'y_prob'.
     """
     seed = config.get("seed", 2)
     epochs = config.get("epochs", 30)

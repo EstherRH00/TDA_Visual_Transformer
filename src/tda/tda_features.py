@@ -9,6 +9,17 @@ from gtda.diagrams import PersistenceImage
 import gudhi as gd
 
 def compute_persistence_image(image):
+    """Compute a persistence image from a grayscale image using cubical persistence.
+
+    Uses giotto-tda's CubicalPersistence to compute persistent homology (H0 and H1),
+    then transforms the persistence diagram into a fixed-size persistence image.
+
+    Args:
+        - image: 2D uint8 numpy array (grayscale image).
+
+    Returns:
+        - pi: numpy array of shape (2, 100, 100) — one 100×100 image per homology dimension.
+    """
     cp = CubicalPersistence()
     diagrams = cp.fit_transform(image[None, :, :])
 
@@ -17,8 +28,18 @@ def compute_persistence_image(image):
     return pi_img[0]
 
 def compute_vector_descriptors(image):
-    """Compute compact TDA vector descriptors: Betti curves + Landscapes + Silhouettes for H0 and H1.
-    Returns a 1D numpy array of ~1200 dimensions."""
+    """Compute compact TDA vector descriptors from a grayscale image using gudhi.
+
+    Extracts Betti curves, Landscapes (5), and Silhouettes at resolution 100
+    for both H0 and H1 homology dimensions. Infinite persistence pairs are excluded.
+
+    Args:
+        - image: 2D numpy array (grayscale image).
+
+    Returns:
+        - descriptors: 1D numpy array of 1400 dimensions
+          (2×100 Betti + 2×500 Landscape + 2×100 Silhouette).
+    """
     cc = gd.CubicalComplex(dimensions=image.shape, top_dimensional_cells=image.flatten().astype(float))
     cc.persistence()
 
@@ -47,7 +68,17 @@ def compute_vector_descriptors(image):
     return np.concatenate([bc_0, bc_1, lc_0, lc_1, s_0, s_1])
 
 def precompute_tda_vector_descriptors_cropped(cache_csv_path, tda_dir):
-    """Compute vector descriptors from pre-cropped lesions."""
+    """Compute and cache vector descriptors from pre-cropped lesion .npy files.
+
+    Adds a 'tda_vec_crop_path' column to the cache CSV. Skips if already computed.
+
+    Args:
+        - cache_csv_path: path to the cached.csv manifest.
+        - tda_dir: directory to save the vector descriptor .npy files.
+
+    Returns:
+        - cache: updated pandas DataFrame with the new column.
+    """
     os.makedirs(tda_dir, exist_ok=True)
     cache = pd.read_csv(cache_csv_path)
     if 'tda_vec_crop_path' in cache.columns and cache['tda_vec_crop_path'].notna().all():
@@ -70,7 +101,18 @@ def precompute_tda_vector_descriptors_cropped(cache_csv_path, tda_dir):
     return cache
 
 def precompute_tda_vector_descriptors_masked(cache_csv_path, df, tda_dir):
-    """Compute vector descriptors from masked crops."""
+    """Compute and cache vector descriptors from masked crops (full mammogram × ROI mask).
+
+    Adds a 'tda_vec_masked_path' column to the cache CSV. Skips if already computed.
+
+    Args:
+        - cache_csv_path: path to the cached.csv manifest.
+        - df: original pandas DataFrame with 'image file path' and 'ROI mask file path' columns.
+        - tda_dir: directory to save the vector descriptor .npy files.
+
+    Returns:
+        - cache: updated pandas DataFrame with the new column.
+    """
     os.makedirs(tda_dir, exist_ok=True)
     cache = pd.read_csv(cache_csv_path)
     if 'tda_vec_masked_path' in cache.columns and cache['tda_vec_masked_path'].notna().all():
@@ -95,7 +137,17 @@ def precompute_tda_vector_descriptors_masked(cache_csv_path, df, tda_dir):
     return cache
 
 def precompute_tda_cropped_image(cache_csv_path, tda_dir):
-    """Compute persistence images from the pre-cropped lesions."""
+    """Compute and cache persistence images from pre-cropped lesion .npy files.
+
+    Adds a 'tda_crop_path' column to the cache CSV. Skips if already computed.
+
+    Args:
+        - cache_csv_path: path to the cached.csv manifest.
+        - tda_dir: directory to save the persistence image .npy files.
+
+    Returns:
+        - cache: updated pandas DataFrame with the new column.
+    """
     os.makedirs(tda_dir, exist_ok=True)
     cache = pd.read_csv(cache_csv_path)
     if 'tda_crop_path' in cache.columns and cache['tda_crop_path'].notna().all():
@@ -119,7 +171,18 @@ def precompute_tda_cropped_image(cache_csv_path, tda_dir):
     return cache
 
 def precompute_tda_masked_mammogram(cache_csv_path, df, tda_dir):
-    """Compute persistence images from masked crops (full mammogram x ROI mask)."""
+    """Compute and cache persistence images from masked crops (full mammogram × ROI mask).
+
+    Adds a 'tda_masked_path' column to the cache CSV. Skips if already computed.
+
+    Args:
+        - cache_csv_path: path to the cached.csv manifest.
+        - df: original pandas DataFrame with 'image file path' and 'ROI mask file path' columns.
+        - tda_dir: directory to save the persistence image .npy files.
+
+    Returns:
+        - cache: updated pandas DataFrame with the new column.
+    """
     os.makedirs(tda_dir, exist_ok=True)
     cache = pd.read_csv(cache_csv_path)
     if 'tda_masked_path' in cache.columns and cache['tda_masked_path'].notna().all():

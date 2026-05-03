@@ -7,16 +7,19 @@ from ..utils.preprocess import preprocess
 
 
 class ExperimentDataset(Dataset):
-    """
-    Dataset for all 8 experiments.
+    """PyTorch Dataset that loads precomputed .npy images with optional preprocessing,
+    augmentation, and TDA features for all experiments (E1–E8).
 
     Args:
-        image_paths: list of paths to precomputed ROI crop .npy files
-        labels: list of int labels (0=benign, 1=malignant)
-        tda_paths: list of paths to TDA persistence image .npy files (or None)
-        use_preprocessing: whether to apply CLAHE + denoise
-        augment: whether to apply data augmentation (train only)
-        img_size: target image size for ViT
+        - roi_paths: list of paths to precomputed ROI crop .npy files.
+        - labels: list of int labels (0=benign, 1=malignant).
+        - tda_paths: list of paths to precomputed TDA .npy files, or None.
+        - use_preprocessing: if True, apply CLAHE + Gaussian denoise.
+        - augment: if True, apply basic augmentation (random horizontal/vertical flips).
+        - aggressive_augmentation: if True, also apply rotation ±15°, zoom 85–100%, shear ±0.1.
+        - tda_as_image: if True, keep TDA array as multi-dim (for DualViTFusionModel);
+          if False, flatten to 1D vector (for FusionModel).
+        - img_size: target image size for ViT input (default 224).
     """
 
     def __init__(self, image_paths, labels, tda_paths=None,

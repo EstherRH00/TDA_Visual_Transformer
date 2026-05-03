@@ -3,6 +3,15 @@ import torch.nn as nn
 import timm
 
 class FusionModel(nn.Module):
+    """Late-fusion model combining a ViT image branch with a linear TDA vector branch.
+
+    The ViT extracts a 768-dim CLS token from the mammogram image. The TDA branch
+    projects a flattened vector descriptor through a linear layer to 128 dims.
+    Both are concatenated and passed through a classifier head.
+
+    Args:
+        - tda_input_dim: dimensionality of the flattened TDA vector (default 1400).
+    """
     def __init__(self, tda_input_dim=1400):
         super().__init__()
 
@@ -18,6 +27,15 @@ class FusionModel(nn.Module):
         )
 
     def forward(self, x, tda):
+        """Forward pass through both branches and the classifier.
+
+        Args:
+            - x: image tensor of shape (batch, 3, 224, 224).
+            - tda: flattened TDA vector of shape (batch, tda_input_dim).
+
+        Returns:
+            - logit: raw logit tensor of shape (batch, 1).
+        """
         vit_features = self.vit(x)
         tda_features = self.tda_fc(tda)
 
@@ -26,8 +44,12 @@ class FusionModel(nn.Module):
 
 
 class DualViTFusionModel(nn.Module):
-    """Two ViT branches: one for the mammogram, one for the persistence image (as a 2D image).
-    CLS tokens from both are concatenated and passed to a classifier."""
+    """Dual-ViT fusion model: one ViT for the mammogram, one for the persistence image.
+
+    The PI (2×100×100, H0 and H1 channels) is padded to 3 channels with zeros
+    and resized to 224×224 before being fed to the second ViT. CLS tokens from
+    both branches are concatenated and passed through a classifier head.
+    """
     def __init__(self):
         super().__init__()
 
@@ -44,6 +66,15 @@ class DualViTFusionModel(nn.Module):
         )
 
     def forward(self, x, tda):
+        """Forward pass through both ViT branches and the classifier.
+
+        Args:
+            - x: image tensor of shape (batch, 3, 224, 224).
+            - tda: persistence image tensor of shape (batch, 2, 100, 100).
+
+        Returns:
+            - logit: raw logit tensor of shape (batch, 1).
+        """
         import torch.nn.functional as F
         # tda shape: (batch, C, H, W) — make 3-channel and resize to 224x224
         if tda.dim() == 3:

@@ -7,5 +7,6 @@ scikit-learn
 matplotlib
 tqdm
 giotto-tda
+gudhi
 pydicom
 pandas
