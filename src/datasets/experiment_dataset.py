@@ -11,7 +11,7 @@ class ExperimentDataset(Dataset):
     Dataset for all 8 experiments.
 
     Args:
-        roi_paths: list of paths to precomputed ROI crop .npy files
+        image_paths: list of paths to precomputed ROI crop .npy files
         labels: list of int labels (0=benign, 1=malignant)
         tda_paths: list of paths to TDA persistence image .npy files (or None)
         use_preprocessing: whether to apply CLAHE + denoise
@@ -19,10 +19,10 @@ class ExperimentDataset(Dataset):
         img_size: target image size for ViT
     """
 
-    def __init__(self, roi_paths, labels, tda_paths=None,
+    def __init__(self, image_paths, labels, tda_paths=None,
                  use_preprocessing=False, augment=False, aggressive_augmentation=False,
                  tda_as_image=False, img_size=224):
-        self.roi_paths = roi_paths
+        self.image_paths = image_paths
         self.labels = labels
         self.tda_paths = tda_paths
         self.use_preprocessing = use_preprocessing
@@ -32,10 +32,10 @@ class ExperimentDataset(Dataset):
         self.img_size = img_size
 
     def __len__(self):
-        return len(self.roi_paths)
+        return len(self.image_paths)
 
     def __getitem__(self, idx):
-        img = np.load(self.roi_paths[idx])
+        img = np.load(self.image_paths[idx])
 
         if self.use_preprocessing:
             img = preprocess(img)

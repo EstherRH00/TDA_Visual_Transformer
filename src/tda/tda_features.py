@@ -6,6 +6,7 @@ from src.utils.image_utils import resolve_mammogram_path, resolve_roi_mask_path,
 
 from gtda.homology import CubicalPersistence
 from gtda.diagrams import PersistenceImage
+import gudhi as gd
 
 def compute_persistence_image(image):
     cp = CubicalPersistence()
@@ -14,9 +15,6 @@ def compute_persistence_image(image):
     pi = PersistenceImage()
     pi_img = pi.fit_transform(diagrams)
     return pi_img[0]
-
-import gudhi as gd
-import gudhi.representations
 
 def compute_vector_descriptors(image):
     """Compute compact TDA vector descriptors: Betti curves + Landscapes + Silhouettes for H0 and H1.

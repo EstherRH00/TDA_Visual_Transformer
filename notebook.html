@@ -8489,11 +8489,11 @@ Amount of rows where the mask and cropped image have the same paths 1226
 <span class="c1"># --- E1: ViT baseline (no preprocessing, no TDA) ---</span>
 <span class="nb">print</span><span class="p">(</span><span class="s1">'=== E1: ViT baseline ==='</span><span class="p">)</span>
 <span class="n">train_ds</span> <span class="o">=</span> <span class="n">ExperimentDataset</span><span class="p">(</span>
-    <span class="n">roi_paths</span><span class="o">=</span><span class="n">train_cache</span><span class="p">[</span><span class="s1">'path'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
+    <span class="n">image_paths</span><span class="o">=</span><span class="n">train_cache</span><span class="p">[</span><span class="s1">'path'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
     <span class="n">labels</span><span class="o">=</span><span class="n">train_cache</span><span class="p">[</span><span class="s1">'label'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
     <span class="n">use_preprocessing</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">augment</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <span class="n">test_ds</span> <span class="o">=</span> <span class="n">ExperimentDataset</span><span class="p">(</span>
-    <span class="n">roi_paths</span><span class="o">=</span><span class="n">test_cache</span><span class="p">[</span><span class="s1">'path'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
+    <span class="n">image_paths</span><span class="o">=</span><span class="n">test_cache</span><span class="p">[</span><span class="s1">'path'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
     <span class="n">labels</span><span class="o">=</span><span class="n">test_cache</span><span class="p">[</span><span class="s1">'label'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
     <span class="n">use_preprocessing</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">augment</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 
@@ -8550,11 +8550,11 @@ Same data as E1, but with preprocessing applied on the fly.</p>
 <div class="highlight hl-ipython3"><pre><span></span><span class="c1"># --- E2: ViT + preprocessing ---</span>
 <span class="nb">print</span><span class="p">(</span><span class="s1">'=== E2: ViT + preprocessing ==='</span><span class="p">)</span>
 <span class="n">train_ds</span> <span class="o">=</span> <span class="n">ExperimentDataset</span><span class="p">(</span>
-    <span class="n">roi_paths</span><span class="o">=</span><span class="n">train_cache</span><span class="p">[</span><span class="s1">'path'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
+    <span class="n">image_paths</span><span class="o">=</span><span class="n">train_cache</span><span class="p">[</span><span class="s1">'path'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
     <span class="n">labels</span><span class="o">=</span><span class="n">train_cache</span><span class="p">[</span><span class="s1">'label'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
     <span class="n">use_preprocessing</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">augment</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <span class="n">test_ds</span> <span class="o">=</span> <span class="n">ExperimentDataset</span><span class="p">(</span>
-    <span class="n">roi_paths</span><span class="o">=</span><span class="n">test_cache</span><span class="p">[</span><span class="s1">'path'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
+    <span class="n">image_paths</span><span class="o">=</span><span class="n">test_cache</span><span class="p">[</span><span class="s1">'path'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
     <span class="n">labels</span><span class="o">=</span><span class="n">test_cache</span><span class="p">[</span><span class="s1">'label'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
     <span class="n">use_preprocessing</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">augment</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 
@@ -8772,12 +8772,12 @@ TDA features are precomputed and concatenated with ViT features via the FusionMo
 
 <span class="nb">print</span><span class="p">(</span><span class="s1">'=== E3: ViT + TDA on full ROI (no preprocessing) ==='</span><span class="p">)</span>
 <span class="n">train_ds</span> <span class="o">=</span> <span class="n">ExperimentDataset</span><span class="p">(</span>
-    <span class="n">roi_paths</span><span class="o">=</span><span class="n">train_cache</span><span class="p">[</span><span class="s1">'path'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
+    <span class="n">image_paths</span><span class="o">=</span><span class="n">train_cache</span><span class="p">[</span><span class="s1">'path'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
     <span class="n">labels</span><span class="o">=</span><span class="n">train_cache</span><span class="p">[</span><span class="s1">'label'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
     <span class="n">tda_paths</span><span class="o">=</span><span class="n">train_cache</span><span class="p">[</span><span class="s1">'tda_path'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
     <span class="n">use_preprocessing</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">augment</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <span class="n">test_ds</span> <span class="o">=</span> <span class="n">ExperimentDataset</span><span class="p">(</span>
-    <span class="n">roi_paths</span><span class="o">=</span><span class="n">test_cache</span><span class="p">[</span><span class="s1">'path'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
+    <span class="n">image_paths</span><span class="o">=</span><span class="n">test_cache</span><span class="p">[</span><span class="s1">'path'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
     <span class="n">labels</span><span class="o">=</span><span class="n">test_cache</span><span class="p">[</span><span class="s1">'label'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
     <span class="n">tda_paths</span><span class="o">=</span><span class="n">test_cache</span><span class="p">[</span><span class="s1">'tda_path'</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
     <span class="n">use_preprocessing</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">augment</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
