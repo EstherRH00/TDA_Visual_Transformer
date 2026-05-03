@@ -3,13 +3,13 @@ import torch.nn as nn
 import timm
 
 class FusionModel(nn.Module):
-    def __init__(self):
+    def __init__(self, tda_input_dim=1400):
         super().__init__()
 
         self.vit = timm.create_model('vit_base_patch16_224', pretrained=True)
         self.vit.head = nn.Identity()
 
-        self.tda_fc = nn.Linear(100, 128)
+        self.tda_fc = nn.Linear(tda_input_dim, 128)
         
         self.classifier = nn.Sequential(
             nn.Linear(768 + 128, 256),
