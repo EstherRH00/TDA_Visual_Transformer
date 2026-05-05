@@ -367,30 +367,32 @@ As it is a type of Convolutional Neural Network, it processes images by using co
 \end{figure}
 
 \section{Topological Data Analysis (TDA) applied to images}\label{TDA}
-% he d'explicar l'algorisme de com aconseguir persistence images
 
 This section explains what topological descriptors represent, and  how to compute homology descriptors that can be embedded in a Visual Transformer: persistence images. 
 
 Topology is a branch of mathematics that studies the shape of objects and their main properties that do not change under continuous transformations. In the context of topological data analysis (TDA), these concepts can be applied to analyse the structure of grayscale images, where the pixel intensity values define the data representation. One of the most commonly used techniques in TDA is persistent homology, which allows to track the appearance and disappearance of topological features, such as connected components and holes, across different intensity thresholds.\cite{tfg}
 
-These features are represented using persistence diagrams (PDs), which describe the lifetime of each topological feature from its birth to its death. Since PDs are not directly suitable for most machine learning models, they are usually transformed into a finite-dimensional representation called persistence images (PIs). In the following sections, we explain the process of transforming grayscale images into persistence images.
-
-First, we consider a grayscale image, where each pixel is associated with an intensity value. This image can be interpreted as a function defined on a grid, in which the intensity values represent different levels of the structure. To analyse this image using TDA, we study how the structure changes when we progressively vary a threshold over the intensity values.
+To obtain topological descriptors from a grayscale image, we consider each pixel to be associated with an intensity value. This image can be interpreted as a function defined on a grid, in which the intensity values represent different levels of the structure. To analyze this image using TDA, we study how the structure changes when we progressively vary a threshold over the intensity values.
 
 For each threshold value, we construct a binary image by selecting the pixels that satisfy the given condition. In this way, we can observe how many connected components and holes are present at each stage. As the threshold changes, new components can appear, existing ones can merge, and holes can be created or filled. Persistent homology allows to track these changes by recording the birth and death of each topological feature.
 
-The information about these features is stored in persistence diagrams, where each point represents a feature with its corresponding birth and death values. These diagrams provide a compact summary of the topological structure of the image across all thresholds. However, since persistence diagrams are not directly compatible with many machine learning algorithms, they are further transformed into persistence images.
+These features are represented using persistence diagrams (PDs), which describe the lifetime of each topological feature from its birth to its death: each point in the diagram with coordinates $(b_i, d_i)$ corresponds to a feature with birth $b_i$ and death $d_i$. These diagrams provide a compact summary of the topological structure of the image across all thresholds. Since PDs are not directly suitable for most machine learning models, they are usually transformed into a finite-dimensional representations. This project uses the following:
+
+\begin{enumerate}
+    \item \textbf{Betti curves:} show how many descriptors are alive at any given time. They can be compute for the topological descriptors of each homology class: in grayscale images: $H_0$ and $H_1$. These curves can be discretized  and fed as vectors to classifier models.\cite{tfg}
+    \item \textbf{Landscapes:} given a persistence diagram, the landscapes can be computed by rotating it and laying it against the diagonal. Then, tent functions are computed for every point above the diagonal: lines paralel to the original axis that connect the point with the diagonal. The landscape functions can be discretized and fed as vectors to classifier models.\cite{tfg}
+    \item \textbf{Silhouettes:} are a weighted average of tent functions with weights $w_i > 0$. A popular choice is $w_i = (d_i - b_i)^p$ where $(b_i, d_i)$ is each point of the persistence diagram and $p$ is a positive integer. Again, these functions can be discretized and fed as vectors to classifier models.\cite{tfg}
+    \item \textbf{Persistence images (PIs):} the persistence diagram is converted into a persistence image by mapping each point into a continuous domain (usually transposing the persistence diagram) and applying a suitable probability distribution and weighting function, $f:\mathbb{R}^2 \to \mathbb{R}$, that must be zero along the horizontal axis, continuous and picewise differentiable\cite{persistence_images_original_paper}. The example in \cite[Image 1]{persistence_images_original_paper} illustrates this procedure.
+\end{enumerate}
 
 The following diagram depicts this process with an example grayscale image. \ref{fig:persistence_diagram}
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=\textwidth]{persistence_diagram.png}
-    \caption[How to compute a persistence diagram]{How to compute a persistence diagram: given a grayscale image, we consider how many connected components ($H_0$) and cycles ($H_1$) there are. By monitoring when they appear (birth) and when they get absorbed by another component, we can draw a Barcode Diagram, that has one paralel line for each component, and a Persistence Diagram, that has one point in coordinates $(B, D)$ corresponding to each birth ($B$) and Death ($D$) of a component.}
+    \includegraphics[width=\textwidth]{persistance_diagram.png}
+    \caption[How to compute a persistence diagram]{How to compute a persistence diagram: given a grayscale image, we consider how many connected components ($H_0$) and cycles ($H_1$) there are. By monitoring when they appear (birth) and when they get absorbed by another component, we can draw a Barcode Diagram, that has one paralel line for each component, and a Persistance Diagram, that has one point in coordinates $(B, D)$ corresponding to each birth ($B$) and Death ($D$) of a component.}
     \label{fig:persistence_diagram}
 \end{figure}
-
-Finally, the persistence diagram is converted into a persistence image by mapping each point into a continuous domain (usually transposing the persistence diagram) and applying a suitable probability distribution and weighting function, $f:\mathbb{R}^2 \to \mathbb{R}$, that must be zero along the horizontal axis, continuous and picewise differentiable\cite{persistence_images_original_paper}. The example in \cite[Image 1]{persistence_images_original_paper} illustrates this procedure.
 
 
 \section{Combining ViT and TDA:}\label{Vit_and_TDA}
@@ -398,7 +400,7 @@ Finally, the persistence diagram is converted into a persistence image by mappin
 Finally, this section explores existing systems that use Topological Data Analysis to improve a Vision Transformer, how it is embedded into the architecture, what applications were explored, and the results achieved.
 
 Recent works have shown that, while Vision Transformers are powerful in capturing global dependencies through self-attention, they may lack robustness in representing intrinsic geometric and topological structures of the data. 
-The integration of TDA can help address this limitation, providin complementary information about the shape and connectivity of data distributions.
+The integration of TDA can help address this limitation, providing complementary information about the shape and connectivity of data distributions.
 
 The work in \textit{TDA-ViT: A Transformer-Based Framework for Unified Urdu Text Recognition via Topological and Visual Feature Fusion} \cite{tda_vit_1} introduces a Transformer-based framework that combines visual and topological features for the task of Urdu text recognition. The approach followed consists of four stages:
 
@@ -413,7 +415,9 @@ This hybrid approach improves robustness to noise and distortions, which are com
 
 Despite these promising contributions, there are still several limitations and open challenges that motivate further research. First, the application domains explored in the current literature remain relatively limited, with a strong focus on text recognition. There is a lack of investigation in other domains such as medical imaging, where topological structures are often highly informative. In particular, mammography datasets such as CBIS-DDSM contain subtle structural patterns (e.g., mass irregularity, spiculation, and boundary complexity) that are not explicitly addressed in the existing works.
 
-Second, the computational cost and scalability of TDA components are not deeply analyzed in these works. Persistent homology can be expensive to compute, especially for high-resolution medical images, and its impact on training efficiency remains an open question.
+Second, other topological descriptors coming from images can be combined with visual transformers via vector composition, and that has not been broadly adressed in the papers found.
+
+Lastly, the computational cost and scalability of TDA components are not deeply analyzed in these works. Persistent homology can be expensive to compute, especially for high-resolution medical images, and its impact on training efficiency remains an open question.
 
 There is a gap in the literature regarding the design of a TDA-enhanced Vision Transformer architectures for medical image classification. In this project, we aim to address it by investigating how topological features can be integrated into a ViT-based pipeline for binary classification of mammography images from the CBIS-DDSM dataset into benign and malignant categories.
 
